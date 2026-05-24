@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
+<topic id="sample-topic">
+  <title>Sample Topic</title>
+  <shortdesc>A small DITA topic for backend validation tests.</shortdesc>
+  <body>
+    <section id="overview">
+      <title>Overview</title>
+      <p>This topic validates with DITA-OT when the toolkit is configured.</p>
+    </section>
+  </body>
+</topic>

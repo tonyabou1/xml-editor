@@ -1,0 +1,13 @@
+{
+  "entry": "sample-map.ditamap",
+  "files": [
+    {
+      "path": "sample-map.ditamap",
+      "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE map PUBLIC \"-//OASIS//DTD DITA Map//EN\" \"map.dtd\">\n<map>\n  <title>Sample Map</title>\n  <topicref href=\"sample-topic.dita\"/>\n</map>\n"
+    },
+    {
+      "path": "sample-topic.dita",
+      "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE topic PUBLIC \"-//OASIS//DTD DITA Topic//EN\" \"topic.dtd\">\n<topic id=\"sample-topic\">\n  <title>Sample Topic</title>\n  <shortdesc>A small DITA topic for backend validation tests.</shortdesc>\n  <body>\n    <section id=\"overview\">\n      <title>Overview</title>\n      <p>This topic validates with DITA-OT when the toolkit is configured.</p>\n    </section>\n  </body>\n</topic>\n"
+    }
+  ]
+}

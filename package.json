@@ -1,0 +1,31 @@
+{
+  "name": "xml-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5175 --strictPort",
+    "backend": "node backend/server.mjs",
+    "db:migrate": "node backend/migrate.mjs",
+    "schema:generate": "node tools/generate-dita-rng-schema.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4174"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "^2.16.2",
+    "@monaco-editor/react": "^4.7.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jose": "^5.10.0",
+    "monaco-editor": "^0.55.1",
+    "pg": "^8.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.2",
+    "vite": "^8.0.13"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5"
+  }
+}
