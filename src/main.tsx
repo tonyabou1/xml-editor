@@ -3,339 +3,74 @@ import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { DiffEditor } from "@monaco-editor/react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { appMenus } from "./config/appMenus";
+import { authoringRibbonGroups } from "./config/authoringRibbon";
 import "./styles.css";
+import {
+  formatGitCommitDate,
+  formatNotificationTime,
+  formatTerminalTime,
+  getGitBranchDisplayName,
+} from "./utils/formatters";
+import {
+  getProjectNodePath,
+  getProjectPathParts,
+  getRelativeProjectHref,
+  isExternalHref,
+  normalizeProjectPath,
+  resolveProjectHref,
+  splitHrefFragment,
+} from "./utils/path";
+import { createValidationReportContent } from "./validation/report";
+import {
+  collectSpellingIssuesForDocument,
+  collectSpellingIssuesForText,
+  collectSpellingTextSegmentsForDocument,
+  isSpellcheckSkippedElement,
+  resolveXmlLanguageForElement,
+  spellingEngineVersion,
+  type SpellingIssue,
+  type SpellingTextSegment,
+} from "./spelling/checker";
+import type {
+  AttributeDefinition,
+  ElementDefinition,
+  DitaSchemaProfile,
+  HrefValidationState,
+  HrefValidationMap,
+  ChatMessage,
+  AiContext,
+  LeanDitaContext,
+  AiOperation,
+  AiSuggestion,
+  NotificationSeverity,
+  AppNotification,
+  SidePanelId,
+  AppMenuCommand,
+  AppMenuItem,
+  AppMenuDefinition,
+  SearchResult,
+  ValidationState,
+  ValidationRun,
+  TerminalMessage,
+  AppAccount,
+  GitHubRepository,
+  GitHubStatus,
+  GitBranch,
+  GitCommitSummary,
+  GitLocalCommitFile,
+  GitLocalCommit,
+  GitConflictPayload,
+  FileGitHistoryPayload,
+  GitHubTreeEntry,
+  DraftSaveState
+} from "./types";
 
-type AttributeDefinition = {
-  name: string;
-  label: string;
-  placeholder?: string;
-  values?: string[];
-};
+const editableCaretSeed = "\u200b";
 
-type ElementDefinition = {
-  children: string[];
-  attributes?: AttributeDefinition[];
-  childOrder?: string[];
-  inline?: boolean;
-  inlineContainer?: boolean;
-  orderedChildren?: boolean;
-  requiredChildren?: string[];
-  template?: string;
-  uniqueChildren?: string[];
-};
-
-type DitaSchemaProfile = {
-  fileTypes: Array<{ key: string; label: string; extension: string }>;
-  rootElements: string[];
-  elements: Record<string, ElementDefinition>;
-};
-
-type HrefValidationState = {
-  pathKey: string;
-  status: "valid" | "invalid";
-  message: string;
-  value: string;
-};
-
-type HrefValidationMap = Record<string, HrefValidationState>;
-
-type ChatMessage = {
-  id?: string;
-  role: "assistant" | "user";
-  text: string;
-};
-
-type AiContext = {
-  activeFileName: string;
-  activeFilePath: string;
-  branchName: string;
-  repositoryName: string;
-  mode: string;
-  topicType: string;
-  selectedElementName: string | null;
-  selectedElementPath: string;
-  selectedElementText: string;
-  allowedChildren: string[];
-  allowedSiblings: string[];
-  attributes: Array<{ name: string; value: string }>;
-  validation: {
-    status: ValidationState["status"];
-    errorCount: number;
-    warningCount: number;
-    messages: string[];
-  };
-  inventory: Array<{ name: string; count: number }>;
-  paragraphs: Array<{ path: string; words: number; preview: string }>;
-};
-
-type LeanDitaContext = {
-  activeFileName: string;
-  topicType: string;
-  title: string;
-  existingShortdesc: string;
-  summaryKind: "concept" | "task" | "reference" | "map" | "topic";
-  paragraphs: Array<{ path: string; words: number; preview: string }>;
-  sections?: Array<{ path: string; title: string; words: number }>;
-  steps?: Array<{ path: string; command: string; words: number }>;
-  referenceBlocks?: Array<{ path: string; tagName: string; preview: string }>;
-  topicrefs?: Array<{ path: string; href: string; navtitle: string; depth: number }>;
-  inventory: Array<{ name: string; count: number }>;
-  validation: AiContext["validation"];
-};
-
-type AiOperation =
-  | {
-      type: "insert_element";
-      placement: "after" | "child";
-      targetPath: number[];
-      tagName: string;
-      text?: string;
-      attributes?: Record<string, string>;
-    }
-  | {
-      type: "set_attribute";
-      targetPath: number[];
-      name: string;
-      value: string;
-    }
-  | {
-      type: "replace_text";
-      targetPath: number[];
-      text: string;
-    }
-  | {
-      type: "replace_range";
-      targetPath: number[];
-      childNodeIndex: number;
-      startOffset: number;
-      endOffset: number;
-      text: string;
-    };
-
-type AiSuggestion = {
-  id: string;
-  severity: "info" | "warning" | "error";
-  title: string;
-  body: string;
-  targetPath?: string;
-  operation?: AiOperation;
-};
-
-type NotificationSeverity = "error" | "info" | "warning";
-
-type AppNotification = {
-  id: string;
-  severity: NotificationSeverity;
-  title: string;
-  body: string;
-  createdAt: string;
-  source?: string;
-  toastDismissed?: boolean;
-};
-
-type SidePanelId = "inspector" | "schema" | "search" | "chat" | "aiReview" | "github" | "notifications" | "help";
-type AppMenuCommand = "customizeAuthoring" | "importFile" | "undo" | "redo" | "preferences" | "specializations" | "viewTerminal";
-
-type AppMenuItem = {
-  id: string;
-  label: string;
-  command?: AppMenuCommand;
-  documentType?: string;
-  disabled?: boolean;
-  icon?: "import" | "preferences" | "redo" | "schema" | "terminal" | "undo" | "placeholder";
-  children?: AppMenuItem[];
-};
-
-type AppMenuDefinition = {
-  id: string;
-  label: string;
-  items: AppMenuItem[];
-};
-
-type SearchResult = {
-  id: string;
-  fileId: string;
-  fileName: string;
-  filePath: string;
-  fileKind: string;
-  kind: "file" | "text";
-  label: string;
-  detail: string;
-  snippet: string;
-  line?: number;
-  isOpen: boolean;
-};
-
-type ValidationState = {
-  status: "idle" | "validating" | "valid" | "invalid" | "error";
-  message: string;
-  runId?: string;
-  validatedAt?: string;
-};
-
-type ValidationRun = {
-  id: string;
-  fileId: string;
-  fileName: string;
-  filePath: string;
-  status: "valid" | "invalid" | "error";
-  validatedAt: string;
-  report: string;
-  output: string;
-  issues: Array<{
-    level?: string;
-    file?: string;
-    line?: number;
-    column?: number;
-    message?: string;
-    raw?: string;
-  }>;
-};
-
-type TerminalMessage = {
-  id: string;
-  createdAt: string;
-  level: "error" | "info" | "warning";
-  message: string;
-  source: string;
-};
-
-type AppAccount = {
-  user: {
-    id: string;
-    email: string;
-    display_name: string;
-    auth_provider: string;
-    auth_subject: string;
-  };
-  memberships: Array<{
-    organization_id: string;
-    organization_name: string;
-    organization_slug: string;
-    team_id: string;
-    team_name: string;
-    team_slug: string;
-    role_id: string | null;
-    role_name: string | null;
-    permissions: string[];
-  }>;
-  access: "granted" | "pending";
-  bootstrappedOwner: boolean;
-};
-
-type GitHubRepository = {
-  githubRepositoryId?: number;
-  fullName: string;
-  ownerLogin?: string;
-  name: string;
-  defaultBranch: string;
-  private: boolean;
-  htmlUrl: string;
-  pushedAt?: string;
-  updatedAt?: string;
-};
-
-type GitHubStatus = {
-  configured: boolean;
-  connected: boolean;
-  connection: {
-    github_login: string;
-    scope: string;
-    connected_at: string;
-    updated_at: string;
-  } | null;
-  selectedRepository: {
-    full_name: string;
-    owner_login: string;
-    name: string;
-    default_branch: string;
-    selected_branch?: string;
-    private: boolean;
-    html_url: string;
-    selected_at: string;
-  } | null;
-};
-
-type GitBranch = {
-  name: string;
-  sha: string;
-  protected: boolean;
-  active: boolean;
-};
-
-type GitCommitSummary = {
-  sha: string;
-  shortSha: string;
-  headline: string;
-  message: string;
-  authorName: string;
-  authorLogin: string;
-  authoredAt: string;
-  committedAt: string;
-  htmlUrl: string;
-};
-
-type GitLocalCommitFile = {
-  filePath: string;
-  githubSha?: string | null;
-  draftContentHash?: string;
-  contentFormat?: string;
-  sizeBytes?: number;
-};
-
-type GitLocalCommit = {
-  id: string;
-  branch_name: string;
-  message: string;
-  status: "pending" | "published" | "failed";
-  github_commit_sha?: string | null;
-  github_commit_url?: string | null;
-  error_message?: string | null;
-  created_at: string;
-  published_at?: string | null;
-  files: GitLocalCommitFile[];
-};
-
-type GitConflictPayload = {
-  filePath: string;
-  fileId?: string;
-  fileName: string;
-  sample?: boolean;
-  sampleExpectInvalid?: boolean;
-  baseSha?: string;
-  currentSha?: string;
-  remoteContent: string;
-  remoteContentHash?: string;
-  localContent: string;
-  localContentHash?: string;
-  message: string;
-};
-
-type FileGitHistoryPayload = {
-  fileId: string;
-  fileName: string;
-  filePath: string;
-  branch: string;
-  commits: GitCommitSummary[];
-  loadedAt: string;
-};
-
-type GitHubTreeEntry = {
-  path: string;
-  type: "file" | "folder";
-  sha?: string;
-  size?: number;
-  ditaType?: string;
-  draftDirty?: boolean;
-  draftSavedAt?: string | null;
-  sourceContentHash?: string;
-  draftContentHash?: string;
-};
-
-type DraftSaveState = {
-  status: "idle" | "saving" | "saved" | "error";
-  message: string;
-};
+function stripEditableCaretSeed(value = "") {
+  return value.replace(/\u200b/g, "");
+}
 
 const starterXml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
@@ -363,41 +98,6 @@ const starterXml = `<?xml version="1.0" encoding="UTF-8"?>
     </section>
   </body>
 </topic>`;
-
-const appMenus: AppMenuDefinition[] = [
-  {
-    id: "file",
-    label: "File",
-    items: [
-      { id: "import-file", label: "Import File", command: "importFile", icon: "import" },
-    ],
-  },
-  {
-    id: "edit",
-    label: "Edit",
-    items: [
-      { id: "undo", label: "Undo", command: "undo", icon: "undo" },
-      { id: "redo", label: "Redo", command: "redo", icon: "redo" },
-    ],
-  },
-  {
-    id: "view",
-    label: "View",
-    items: [
-      { id: "view-terminal", label: "View Terminal", command: "viewTerminal", icon: "terminal" },
-    ],
-  },
-  { id: "map", label: "Map", items: [{ id: "map-empty", label: "No commands yet", disabled: true }] },
-  {
-    id: "options",
-    label: "Options",
-    items: [
-      { id: "preferences", label: "Preferences", command: "preferences", icon: "preferences" },
-      { id: "specializations", label: "Specializations...", command: "specializations", icon: "schema" },
-    ],
-  },
-  { id: "help", label: "Help", items: [{ id: "help-empty", label: "No commands yet", disabled: true }] },
-];
 
 const brokenDitaXml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
@@ -438,6 +138,267 @@ const specializationsTabFile = {
   ditaType: "specializations",
   content: "",
 };
+const visualTemplatesTabId = "system-visual-template-designer";
+const visualTemplatesTabFile = {
+  id: visualTemplatesTabId,
+  name: "Template Bindings",
+  type: "file",
+  ditaType: "visual-template-binding",
+  content: "",
+};
+const defaultVisualTemplateModel = {
+  id: "topic-deliverable-binding",
+  name: "Topic deliverable binding",
+  template: {
+    id: "topic-deliverable-template",
+    name: "Topic deliverable template",
+    source: "built-in",
+  },
+  output: "responsive-html",
+  filePath: "",
+  regions: [
+    {
+      id: "hero",
+      label: "Hero",
+      role: "headline",
+      binding: "title",
+      notes: "Primary title slot for the selected topic or map.",
+      style: {
+        fillMode: "gradient",
+        backgroundColor: "#eef5ff",
+        gradientFrom: "#eef5ff",
+        gradientTo: "#fff7ed",
+        gradientAngle: 135,
+        backgroundImage: "",
+        backgroundImageMode: "none",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundOverlayColor: "#000000",
+        backgroundOverlayOpacity: 0,
+        borderColor: "#b9c9df",
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 14,
+        minHeight: 150,
+        shadowPreset: "soft",
+        shadowColor: "#23406f",
+        shadowOpacity: 14,
+        shadowX: 0,
+        shadowY: 18,
+        shadowBlur: 38,
+        animationName: "none",
+        animationDuration: 600,
+        animationDelay: 0,
+      },
+      textStyle: {
+        color: "#172033",
+        fontSize: 30,
+        fontWeight: 850,
+        textAlign: "left",
+      },
+    },
+    {
+      id: "summary",
+      label: "Summary",
+      role: "deck",
+      binding: "shortdesc",
+      notes: "Short description or generated abstract.",
+      style: {},
+      textStyle: {
+        color: "#475467",
+        fontSize: 13,
+        fontWeight: 650,
+        textAlign: "left",
+      },
+    },
+    {
+      id: "body",
+      label: "Body",
+      role: "flow",
+      binding: "bodyParagraphs",
+      notes: "Main authored paragraphs and sections.",
+      style: {
+        fillMode: "solid",
+        backgroundColor: "#ffffff",
+        gradientFrom: "#ffffff",
+        gradientTo: "#eef5ff",
+        gradientAngle: 135,
+        backgroundImage: "",
+        backgroundImageMode: "none",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundOverlayColor: "#000000",
+        backgroundOverlayOpacity: 0,
+        borderColor: "#b9c9df",
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 14,
+        minHeight: 260,
+        shadowPreset: "none",
+        shadowColor: "#23406f",
+        shadowOpacity: 12,
+        shadowX: 0,
+        shadowY: 12,
+        shadowBlur: 24,
+        animationName: "none",
+        animationDuration: 600,
+        animationDelay: 0,
+      },
+      textStyle: {
+        color: "#475467",
+        fontSize: 13,
+        fontWeight: 500,
+        textAlign: "left",
+      },
+    },
+    {
+      id: "sidebar",
+      label: "Sidebar",
+      role: "navigation",
+      binding: "topicrefs",
+      notes: "Map topic references or supporting links.",
+      style: {
+        fillMode: "solid",
+        backgroundColor: "#fbfdff",
+        gradientFrom: "#fbfdff",
+        gradientTo: "#eef5ff",
+        gradientAngle: 135,
+        backgroundImage: "",
+        backgroundImageMode: "none",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundOverlayColor: "#000000",
+        backgroundOverlayOpacity: 0,
+        borderColor: "#b9c9df",
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 14,
+        minHeight: 260,
+        shadowPreset: "none",
+        shadowColor: "#23406f",
+        shadowOpacity: 12,
+        shadowX: 0,
+        shadowY: 12,
+        shadowBlur: 24,
+        animationName: "none",
+        animationDuration: 600,
+        animationDelay: 0,
+      },
+      textStyle: {
+        color: "#2f5ea7",
+        fontSize: 11,
+        fontWeight: 750,
+        textAlign: "left",
+      },
+    },
+  ],
+};
+
+const visualTemplateStyleDefaults = {
+  style: {
+    fillMode: "solid",
+    backgroundColor: "#ffffff",
+    gradientFrom: "#ffffff",
+    gradientTo: "#eef5ff",
+    gradientAngle: 135,
+    backgroundImage: "",
+    backgroundImageMode: "none",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    backgroundOverlayColor: "#000000",
+    backgroundOverlayOpacity: 0,
+    borderColor: "#b9c9df",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 14,
+    minHeight: 120,
+    shadowPreset: "none",
+    shadowColor: "#23406f",
+    shadowOpacity: 12,
+    shadowX: 0,
+    shadowY: 12,
+    shadowBlur: 24,
+    animationName: "none",
+    animationDuration: 600,
+    animationDelay: 0,
+  },
+  textStyle: {
+    color: "#172033",
+    fontSize: 13,
+    fontWeight: 500,
+    textAlign: "left",
+  },
+};
+
+function normalizeVisualTemplateStyle(style: any, fallback: any = {}) {
+  return {
+    ...fallback,
+    ...(style && typeof style === "object" ? style : {}),
+  };
+}
+
+function hexToRgbColor(hex = "#000000") {
+  const clean = String(hex || "#000000").replace("#", "").trim();
+  const expanded = clean.length === 3
+    ? clean.split("").map((char) => `${char}${char}`).join("")
+    : clean;
+  const value = Number.parseInt(expanded.padEnd(6, "0").slice(0, 6), 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function rgbaFromHexColor(hex = "#000000", opacity = 100) {
+  const { r, g, b } = hexToRgbColor(hex);
+  const alpha = Math.max(0, Math.min(100, Number(opacity) || 0)) / 100;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function cssUrlValue(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  return `url("${clean.replace(/"/g, "%22")}")`;
+}
+
+function normalizeVisualTemplateModel(rawModel: any) {
+  const model = rawModel && typeof rawModel === "object" ? rawModel : {};
+  const template = model.template && typeof model.template === "object"
+    ? model.template
+    : defaultVisualTemplateModel.template;
+  const defaultRegionsById = new Map(defaultVisualTemplateModel.regions.map((region) => [region.id, region]));
+  const regions = Array.isArray(model.regions) && model.regions.length
+    ? model.regions.map((region) => {
+        const fallback = defaultRegionsById.get(region?.id) || defaultVisualTemplateModel.regions[0];
+        return {
+          ...fallback,
+          ...(region && typeof region === "object" ? region : {}),
+          style: normalizeVisualTemplateStyle(region?.style, fallback.style || visualTemplateStyleDefaults.style),
+          textStyle: normalizeVisualTemplateStyle(region?.textStyle, fallback.textStyle || visualTemplateStyleDefaults.textStyle),
+        };
+      })
+    : defaultVisualTemplateModel.regions;
+
+  return {
+    ...defaultVisualTemplateModel,
+    ...model,
+    template,
+    regions,
+  };
+}
+
+function parseVisualTemplateModel(content: string) {
+  try {
+    return normalizeVisualTemplateModel(JSON.parse(String(content || "")));
+  } catch {
+    return normalizeVisualTemplateModel(defaultVisualTemplateModel);
+  }
+}
 const authoringProfileTabPrefix = "system-authoring-profile";
 const validationSessionId = (
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -482,9 +443,9 @@ const fallbackDitaSchemaProfile: DitaSchemaProfile = {
       template: "section",
     },
     context: { children: ["p", "note", "fig", "image"] },
-    steps: { children: ["step"] },
-    step: { children: ["cmd", "info", "stepxmp"] },
-    cmd: { children: ["ph", "xref", "image", "b", "i", "u"], inlineContainer: true },
+    steps: { children: ["step"], requiredChildren: ["step"], orderedChildren: true, childOrder: ["step"] },
+    step: { children: ["cmd", "info", "stepxmp"], requiredChildren: ["cmd"], orderedChildren: true, childOrder: ["cmd", "info", "stepxmp"] },
+    cmd: { children: ["ph", "xref", "image", "b", "i", "u", "codeph"], inlineContainer: true },
     info: { children: ["p", "note", "fig", "image"] },
     stepxmp: { children: ["p", "codeblock"] },
     result: { children: ["p", "note", "fig", "image"] },
@@ -502,10 +463,10 @@ const fallbackDitaSchemaProfile: DitaSchemaProfile = {
         { name: "scope", label: "scope", placeholder: "local" },
       ],
     },
-    ul: { children: ["li"], template: "list" },
-    ol: { children: ["li"], template: "list" },
+    ul: { children: ["li"], requiredChildren: ["li"], orderedChildren: true, childOrder: ["li"], template: "list" },
+    ol: { children: ["li"], requiredChildren: ["li"], orderedChildren: true, childOrder: ["li"], template: "list" },
     li: { children: ["p", "ul", "ol", "note", "fig", "image", "xref", "ph"] },
-    p: { children: ["ph", "xref", "image", "b", "i", "u"], inlineContainer: true, template: "emptyText" },
+    p: { children: ["ph", "xref", "image", "b", "i", "u", "codeph"], inlineContainer: true, template: "emptyText" },
     note: {
       children: ["p", "ph", "xref", "image", "codeblock"],
       template: "note",
@@ -564,10 +525,11 @@ const fallbackDitaSchemaProfile: DitaSchemaProfile = {
       template: "xref",
       attributes: [...commonAttributeDefinitions, ...linkAttributeDefinitions],
     },
-    ph: { children: ["xref", "image", "b", "i", "u"], inline: true, inlineContainer: true, template: "emptyText" },
-    b: { children: ["ph", "xref", "image", "i", "u"], inline: true, inlineContainer: true, template: "emptyText" },
-    i: { children: ["ph", "xref", "image", "b", "u"], inline: true, inlineContainer: true, template: "emptyText" },
-    u: { children: ["ph", "xref", "image", "b", "i"], inline: true, inlineContainer: true, template: "emptyText" },
+    ph: { children: ["xref", "image", "b", "i", "u", "codeph"], inline: true, inlineContainer: true, template: "emptyText" },
+    b: { children: ["ph", "xref", "image", "i", "u", "codeph"], inline: true, inlineContainer: true, template: "emptyText" },
+    i: { children: ["ph", "xref", "image", "b", "u", "codeph"], inline: true, inlineContainer: true, template: "emptyText" },
+    u: { children: ["ph", "xref", "image", "b", "i", "codeph"], inline: true, inlineContainer: true, template: "emptyText" },
+    codeph: { children: ["ph", "xref", "image", "b", "i", "u"], inline: true, inlineContainer: true, template: "emptyText" },
   },
 };
 
@@ -579,6 +541,29 @@ let activeAuthoringProfiles: Record<string, { enabled: boolean; visibleElements:
 
 function getActiveDitaSchemaProfile(): DitaSchemaProfile {
   return activeDitaSchemaProfile;
+}
+
+function getDocumentRootElementNames() {
+  const profile = getActiveDitaSchemaProfile();
+
+  return new Set(
+    [
+      ...(profile.rootElements || []),
+      ...(profile.fileTypes || []).map((fileType) => fileType.key),
+    ].filter(Boolean)
+  );
+}
+
+function isDocumentRootElement(tagName: string) {
+  return getDocumentRootElementNames().has(tagName);
+}
+
+function isTopicRootCandidate(tagName: string) {
+  if (!tagName) return false;
+  if (isDocumentRootElement(tagName)) return true;
+
+  const definition = getElementDefinition(tagName);
+  return Boolean(definition?.contentRefs?.includes(`${tagName}-info-types`));
 }
 
 function getSpecializationByName(tagName: string) {
@@ -598,6 +583,85 @@ function getSpecializationDefinition(specialization: any) {
 
 function isValidSpecialization(specialization: any) {
   return specialization?.status === "valid";
+}
+
+function classChainIncludesBaseElement(classChain = "", baseName: string) {
+  if (!classChain || !baseName) return false;
+  return classChain.split(/\s+/).some((token) => token.endsWith(`/${baseName}`));
+}
+
+function getDefinitionClassChain(definition: Partial<ElementDefinition> | null | undefined): string {
+  return [
+    definition?.classChain,
+    (definition as any)?.class,
+    (definition as any)?.ditaClass,
+    (definition as any)?.className,
+    ...(Array.isArray(definition?.attributes)
+      ? definition.attributes
+          .filter((attribute) => attribute.name === "class")
+          .flatMap((attribute) => [
+            (attribute as any).defaultValue,
+            (attribute as any).value,
+            attribute.placeholder,
+          ])
+      : []),
+  ]
+    .filter(Boolean)
+    .map(String)
+    .join(" ");
+}
+
+function definitionContentRefsInclude(definition: Partial<ElementDefinition> | null | undefined, refName: string): boolean {
+  return Boolean(
+    Array.isArray(definition?.contentRefs) &&
+    definition.contentRefs.some((ref) => String(ref) === refName),
+  );
+}
+
+function definitionSpecializesFrom(
+  definition: Partial<ElementDefinition> | null | undefined,
+  baseName: string,
+  visited = new Set<string>(),
+): boolean {
+  if (!definition || !baseName) return false;
+
+  const definitionName = String((definition as any).name || "");
+  const definitionBase = definition.baseName || (definition as any).base || (definition as any).specializesFrom || "";
+  const classChain = getDefinitionClassChain(definition);
+
+  if (definitionName === baseName || definitionBase === baseName || classChainIncludesBaseElement(classChain, baseName)) {
+    return true;
+  }
+
+  if (baseName === "body" && definitionContentRefsInclude(definition, "body.cnt")) {
+    return true;
+  }
+
+  return Boolean(definitionBase && !visited.has(definitionBase) && elementSpecializesFrom(definitionBase, baseName, visited));
+}
+
+function elementSpecializesFrom(tagName: string, baseName: string, visited = new Set<string>()): boolean {
+  if (!tagName || !baseName || visited.has(tagName)) return false;
+  if (tagName === baseName) return true;
+  if (tagName === "step" && baseName === "li") return true;
+
+  visited.add(tagName);
+
+  const definition = getElementDefinition(tagName);
+  const specialization = getSpecializationByName(tagName);
+  const specializationBase = specialization?.baseName || specialization?.definition?.baseName || definition?.baseName || "";
+  const classChain = getSpecializationClassChain(tagName);
+
+  return specializationBase === baseName ||
+    classChainIncludesBaseElement(classChain, baseName) ||
+    definitionSpecializesFrom(definition, baseName, visited) ||
+    Boolean(specializationBase && elementSpecializesFrom(specializationBase, baseName, visited));
+}
+
+function nodeSpecializesFrom(node: Element | null | undefined, baseName: string): boolean {
+  if (!node) return false;
+  return elementSpecializesFrom(node.tagName, baseName) ||
+    classChainIncludesBaseElement(node.getAttribute("class") || "", baseName);
 }
 
 function getSpecializationScope(specialization: any): string[] {
@@ -694,11 +758,15 @@ function applySpecializationOverlays(profile: DitaSchemaProfile, specializations
       tagName,
       {
         ...definition,
+        baseName: definition.baseName,
+        classChain: definition.classChain,
         children: [...(definition.children || [])],
         attributes: [...(definition.attributes || [])],
-        childOrder: definition.childOrder ? [...definition.childOrder] : undefined,
-        requiredChildren: definition.requiredChildren ? [...definition.requiredChildren] : undefined,
-        uniqueChildren: definition.uniqueChildren ? [...definition.uniqueChildren] : undefined,
+      childOrder: definition.childOrder ? [...definition.childOrder] : undefined,
+      contentRefs: definition.contentRefs ? [...definition.contentRefs] : undefined,
+      requiredChildren: definition.requiredChildren ? [...definition.requiredChildren] : undefined,
+      sourceFiles: definition.sourceFiles ? [...definition.sourceFiles] : undefined,
+      uniqueChildren: definition.uniqueChildren ? [...definition.uniqueChildren] : undefined,
       },
     ]),
   );
@@ -717,13 +785,17 @@ function applySpecializationOverlays(profile: DitaSchemaProfile, specializations
 
     elements[name] = {
       ...baseDefinition,
+      baseName,
+      classChain: specialization?.classChain || specialization?.definition?.classChain || baseDefinition.classChain,
       children: [...(baseDefinition.children || [])],
       attributes: [
         ...(baseDefinition.attributes || []),
         { name: "class", label: "class", placeholder: "DITA specialization class" },
       ],
       childOrder: baseDefinition.childOrder ? [...baseDefinition.childOrder] : undefined,
+      contentRefs: baseDefinition.contentRefs ? [...baseDefinition.contentRefs] : undefined,
       requiredChildren: baseDefinition.requiredChildren ? [...baseDefinition.requiredChildren] : undefined,
+      sourceFiles: baseDefinition.sourceFiles ? [...baseDefinition.sourceFiles] : undefined,
       uniqueChildren: baseDefinition.uniqueChildren ? [...baseDefinition.uniqueChildren] : undefined,
     };
 
@@ -757,6 +829,8 @@ function applySpecializationOverlays(profile: DitaSchemaProfile, specializations
 
     elements[name] = {
       ...baseDefinition,
+      baseName,
+      classChain: specialization?.classChain || specialization?.definition?.classChain || baseDefinition.classChain,
       attributes: [
         ...new Map(inheritedAttributes.map((attribute) => [attribute.name, attribute])).values(),
       ],
@@ -820,6 +894,11 @@ function isKnownInlineElement(tagName: string): boolean {
   return Boolean(getActiveDitaSchemaProfile().elements[tagName]?.inline);
 }
 
+function elementAllowsText(tagName: string): boolean {
+  const definition = getElementDefinition(tagName);
+  return definition?.allowsText !== false;
+}
+
 const ditaFileTypes = fallbackDitaSchemaProfile.fileTypes;
 const genericFileTypes = [
   ...ditaFileTypes,
@@ -838,6 +917,68 @@ function getElementDefinition(tagName: string): ElementDefinition | null {
 
 function isInlineContainerElement(tagName: string): boolean {
   return Boolean(getElementDefinition(tagName)?.inlineContainer);
+}
+
+function isInlineRenderingElement(tagName: string): boolean {
+  if (elementSpecializesFrom(tagName, "body")) return false;
+  return isInlineInsertionElement(tagName);
+}
+
+function isInlineSchemaContent(tagName: string, definition: any, fallbackDefinition: Partial<ElementDefinition> = {}) {
+  if (
+    tagName === "body" ||
+    definitionSpecializesFrom({ ...fallbackDefinition, ...definition, name: tagName }, "body")
+  ) {
+    return false;
+  }
+
+  if (!definition?.allowsText) return Boolean(fallbackDefinition.inline);
+  if (fallbackDefinition.inline) return true;
+
+  const refs = Array.isArray(definition.contentRefs) ? definition.contentRefs : [];
+  if (refs.some((ref) => /\.(ph|keyword|term|tm|xrefph|txt|text)\.cnt$|^(ph|xrefph)\.cnt$/i.test(String(ref)))) {
+    return true;
+  }
+
+  const children = Array.isArray(definition.content) ? definition.content : [];
+  if (!children.length) return true;
+
+  const blockChildren = new Set([
+    "body",
+    "conbody",
+    "section",
+    "p",
+    "ul",
+    "ol",
+    "dl",
+    "sl",
+    "table",
+    "simpletable",
+    "fig",
+    "note",
+    "codeblock",
+    "steps",
+    "step",
+    "topic",
+    "concept",
+    "task",
+    "reference",
+  ]);
+
+  return !children.some((child) => blockChildren.has(child?.name));
+}
+
+function getVisualTagForElement(tagName: string) {
+  if (tagName === "title") return "h2";
+  if (tagName === "shortdesc") return "p";
+  if (tagName === "li") return "li";
+  if (tagName === "step") return "li";
+  if (tagName === "p") return "p";
+  if (tagName === "b") return "strong";
+  if (tagName === "i") return "em";
+  if (tagName === "codeph") return "code";
+  if (tagName === "u" || tagName === "xref" || isInlineRenderingElement(tagName)) return "span";
+  return "div";
 }
 
 function getAttributeDefinitions(tagName: string): AttributeDefinition[] {
@@ -933,13 +1074,49 @@ function deriveOrderedChildrenFromContentModel(model): string[] {
   )];
 }
 
+function collectRequiredElementNamesFromModel(model, result: string[] = []): string[] {
+  if (!model || ["optional", "zeroOrMore"].includes(model.type)) return result;
+
+  if (model.type === "choice") {
+    return result;
+  }
+
+  if (model.type === "ref" && model.name && !model.name.includes(".")) {
+    result.push(model.name);
+    return result;
+  }
+
+  if (model.type === "element" && model.name) {
+    result.push(model.name);
+    return result;
+  }
+
+  for (const child of model.children || []) {
+    collectRequiredElementNamesFromModel(child, result);
+  }
+
+  return result;
+}
+
 function deriveRequiredChildrenFromContentModel(model): string[] {
   if (model?.type !== "sequence") return [];
 
   return [...new Set<string>(
-    (model.children || [])
-      .filter((child) => !["optional", "zeroOrMore"].includes(child.type))
-      .flatMap((child) => collectDirectElementNamesFromModel(child)),
+    (model.children || []).flatMap((child) => collectRequiredElementNamesFromModel(child)),
+  )];
+}
+
+function deriveRequiredChildrenFromContentList(content): string[] {
+  if (!Array.isArray(content)) return [];
+
+  return [...new Set<string>(
+    content
+      .filter((child) => {
+        const min = child?.min;
+        return min === undefined || min === null || Number(min) > 0;
+      })
+      .map((child) => child?.name)
+      .filter((name): name is string => typeof name === "string" && name !== "text"),
   )];
 }
 
@@ -966,25 +1143,28 @@ function convertRngSchemaToUiProfile(rngSchema, requestedType = ""): DitaSchemaP
       : fallbackDefinition.uniqueChildren || [];
     const orderedChildren = deriveOrderedChildrenFromContentModel(generatedDefinition.contentModel);
     const requiredChildren = deriveRequiredChildrenFromContentModel(generatedDefinition.contentModel);
+    const requiredContentChildren = requiredChildren.length
+      ? requiredChildren
+      : deriveRequiredChildrenFromContentList(generatedDefinition.content);
     const sourceFiles = Array.isArray(generatedDefinition.sourceFiles) ? generatedDefinition.sourceFiles : [];
-    const isInline = Boolean(
-      generatedDefinition.allowsText &&
-      (
-        sourceFiles.some((source) => /highlightDomain|markupDomain|programmingDomain|softwareDomain|uiDomain/i.test(source)) ||
-        fallbackDefinition.inline
-      ),
-    );
+    const isInline = isInlineSchemaContent(tagName, generatedDefinition, fallbackDefinition);
 
     elements[tagName] = {
+      name: tagName,
       children: [...new Set(children)] as string[],
+      allowsText: Boolean(generatedDefinition.allowsText),
       attributes: Array.isArray(generatedDefinition.attributes)
         ? generatedDefinition.attributes.map(normalizeRngAttribute).filter((attribute) => attribute.name)
         : fallbackDefinition.attributes,
+      baseName: generatedDefinition.baseName || fallbackDefinition.baseName,
       childOrder: orderedChildren,
+      classChain: generatedDefinition.classChain || generatedDefinition.class || fallbackDefinition.classChain,
+      contentRefs: Array.isArray(generatedDefinition.contentRefs) ? generatedDefinition.contentRefs : fallbackDefinition.contentRefs,
       inline: isInline,
       inlineContainer: Boolean(generatedDefinition.allowsText || fallbackDefinition.inlineContainer),
       orderedChildren: Boolean(orderedChildren.length || fallbackDefinition.orderedChildren),
-      requiredChildren,
+      requiredChildren: requiredContentChildren,
+      sourceFiles,
       template: fallbackDefinition.template,
       uniqueChildren: [...new Set<string>(uniqueChildren)],
     };
@@ -994,12 +1174,26 @@ function convertRngSchemaToUiProfile(rngSchema, requestedType = ""): DitaSchemaP
     elements[tagName] = {
       ...definition,
       ...(elements[tagName] || {}),
+      allowsText: elements[tagName]?.allowsText ?? definition.allowsText,
+      baseName: elements[tagName]?.baseName || definition.baseName,
       template: definition.template || elements[tagName]?.template,
       orderedChildren: definition.orderedChildren || elements[tagName]?.orderedChildren,
       childOrder: elements[tagName]?.childOrder || definition.childOrder,
+      classChain: elements[tagName]?.classChain || definition.classChain,
+      contentRefs: elements[tagName]?.contentRefs || definition.contentRefs,
       requiredChildren: elements[tagName]?.requiredChildren || definition.requiredChildren,
+      sourceFiles: elements[tagName]?.sourceFiles || definition.sourceFiles,
       uniqueChildren: elements[tagName]?.uniqueChildren || definition.uniqueChildren,
     };
+  }
+
+  for (const tagName of elements.ph?.children || []) {
+    if (tagName !== "text" && elements[tagName]) {
+      elements[tagName] = {
+        ...elements[tagName],
+        inline: true,
+      };
+    }
   }
 
   const fileTypes = Array.isArray(rngSchema?.fileTypes) && rngSchema.fileTypes.length
@@ -1015,76 +1209,6 @@ function convertRngSchemaToUiProfile(rngSchema, requestedType = ""): DitaSchemaP
     rootElements: fileTypes.map((fileType) => fileType.key).filter(Boolean),
     elements,
   };
-}
-
-function getProjectNodePath(pathParts: string[]): string {
-  return pathParts.filter(Boolean).join("/");
-}
-
-function getProjectPathParts(path: string): string[] {
-  const parts: string[] = [];
-
-  path.split("/").forEach((part) => {
-    if (!part || part === ".") return;
-    if (part === "..") {
-      parts.pop();
-      return;
-    }
-
-    parts.push(part);
-  });
-
-  return parts;
-}
-
-function normalizeProjectPath(path: string): string {
-  return getProjectPathParts(path).join("/");
-}
-
-function getGitBranchDisplayName(branchName: string): string {
-  return String(branchName || "")
-    .replace(/^refs\/heads\//, "")
-    .replace(/^refs\/remotes\/[^/]+\//, "")
-    .replace(/^(origin|upstream)\//, "");
-}
-
-function formatGitCommitDate(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatNotificationTime(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatTerminalTime(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function isExternalHref(href: string): boolean {
-  return /^(https?:|data:|blob:)/i.test(href.trim());
 }
 
 function getProjectFilePath(node, id, pathParts: string[] = []): string {
@@ -1134,61 +1258,6 @@ function collectValidationFiles(projectTree, fileHistories) {
 
       return validationFile;
     });
-}
-
-function createValidationReportContent({ fileName, filePath, result, validatedAt, note = "" }) {
-  const issues = Array.isArray(result.issues) ? result.issues : [];
-  const output = String(result.output || "").trim();
-  const lines = [
-    `Validation report: ${fileName}`,
-    `Validated: ${validatedAt}`,
-    `Entry: ${filePath}`,
-    `Engine: ${result.engine || "unknown"}`,
-    `Status: ${result.ok ? "Valid" : "Invalid"}`,
-    "",
-  ];
-
-  if (issues.length) {
-    lines.push("Issues:");
-    issues.forEach((issue, index) => {
-      const location = [
-        issue.file,
-        issue.line ? `line ${issue.line}` : "",
-        issue.column ? `column ${issue.column}` : "",
-      ].filter(Boolean).join(", ");
-      lines.push(`${index + 1}. [${issue.level || "error"}] ${issue.message || "Validation issue"}`);
-      if (location) {
-        lines.push(`   Location: ${location}`);
-      }
-      if (issue.raw && issue.raw !== issue.message) {
-        lines.push(`   DITA-OT: ${issue.raw}`);
-      }
-    });
-  } else if (result.ok) {
-    lines.push("No DITA validation issues were reported.");
-  } else {
-    lines.push("DITA-OT reported a validation failure without structured issues.");
-  }
-
-  if (Array.isArray(result.specializationGeneralization) && result.specializationGeneralization.length) {
-    lines.push("", "Specialization validation bridge:");
-    result.specializationGeneralization.forEach((entry) => {
-      const mapped = (entry.specializations || [])
-        .map((specialization) => `<${specialization.name}> as <${specialization.baseName}>`)
-        .join(", ");
-      lines.push(`- ${entry.path}: ${mapped}`);
-    });
-  }
-
-  if (output) {
-    lines.push("", "Raw DITA-OT output:", output);
-  }
-
-  if (note) {
-    lines.push("", note);
-  }
-
-  return lines.join("\n");
 }
 
 function findProjectFileByPath(node, targetPath: string, pathParts: string[] = []) {
@@ -1411,45 +1480,6 @@ function renderHighlightedSearchText(text: string, query: string) {
   }
 
   return parts;
-}
-
-function resolveProjectHref(fromFilePath: string, href: string): string {
-  const trimmed = href.trim();
-  if (!trimmed || isExternalHref(trimmed)) return trimmed;
-  if (trimmed.startsWith("/")) return normalizeProjectPath(trimmed.slice(1));
-
-  const fromDirectory = getProjectPathParts(fromFilePath).slice(0, -1).join("/");
-  return normalizeProjectPath(`${fromDirectory}/${trimmed}`);
-}
-
-function getRelativeProjectHref(fromFilePath: string, targetPath: string): string {
-  const fromDirectoryParts = getProjectPathParts(fromFilePath).slice(0, -1);
-  const targetParts = getProjectPathParts(targetPath);
-  let sharedIndex = 0;
-
-  while (
-    sharedIndex < fromDirectoryParts.length &&
-    sharedIndex < targetParts.length &&
-    fromDirectoryParts[sharedIndex] === targetParts[sharedIndex]
-  ) {
-    sharedIndex += 1;
-  }
-
-  const upwardParts = fromDirectoryParts.slice(sharedIndex).map(() => "..");
-  const downwardParts = targetParts.slice(sharedIndex);
-  return [...upwardParts, ...downwardParts].join("/") || targetParts.at(-1) || "";
-}
-
-function splitHrefFragment(href: string) {
-  const hashIndex = href.indexOf("#");
-  if (hashIndex === -1) {
-    return { path: href, fragment: "" };
-  }
-
-  return {
-    path: href.slice(0, hashIndex),
-    fragment: href.slice(hashIndex),
-  };
 }
 
 const pathKeyFor = (path: number[]) => path.join(".");
@@ -1811,7 +1841,7 @@ function getPreferredBodyChild(definition: ElementDefinition | null | undefined,
       kind === "element" &&
       name &&
       profile.elements[name] &&
-      isBodyLikeElementName(baseName) &&
+      isBodyLikeElementName(baseName, profile) &&
       children.includes(baseName) &&
       specializationAppliesToDocument(specialization, rootName)
     );
@@ -1821,21 +1851,25 @@ function getPreferredBodyChild(definition: ElementDefinition | null | undefined,
     return scopedSpecializedBody.name || scopedSpecializedBody.definition?.name || "";
   }
 
-  const bodyChildren = orderedChildren.filter((childName) => children.includes(childName) && isBodyLikeElementName(childName));
+  const bodyChildren = orderedChildren.filter((childName) => children.includes(childName) && isBodyLikeElementName(childName, profile));
   const specializedBodyChild = bodyChildren.find((childName) => {
     const specialization = getSpecializationByName(childName);
     const baseName = specialization?.baseName || specialization?.definition?.baseName || "";
-    return Boolean(specialization && isBodyLikeElementName(baseName));
+    return Boolean(specialization && isBodyLikeElementName(baseName, profile));
   });
 
   return specializedBodyChild ||
-    bodyChildren.find((childName) => /(body|bodydiv)$/i.test(childName)) ||
     bodyChildren[0] ||
     "";
 }
 
-function isBodyLikeElementName(tagName = "") {
-  return /(body|bodydiv)$/i.test(tagName) || /body/i.test(tagName);
+function isBodyLikeElementName(tagName = "", profile = getActiveDitaSchemaProfile()) {
+  if (!tagName) return false;
+  if (tagName === "body") return true;
+
+  const definition = profile.elements[tagName];
+  if (definitionSpecializesFrom(definition, "body")) return true;
+  return elementSpecializesFrom(tagName, "body");
 }
 
 function getBodySpecializationBase(tagName: string) {
@@ -1925,6 +1959,10 @@ function getProjectFileKind(file) {
 
   if (file.ditaType === "authoring-profile") {
     return "authoring-profile";
+  }
+
+  if (file.ditaType === "visual-template" || file.ditaType === "visual-template-binding") {
+    return "visual-template";
   }
 
   if (file.ditaType === "git-history") {
@@ -2099,9 +2137,50 @@ function inferProjectFileType(fileName: string) {
 
   if (/^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)) return "image";
   if (["ditamap"].includes(extension)) return "map";
-  if (["dita", "xml"].includes(extension)) return "topic";
+  if (["dita", "xml"].includes(extension)) {
+    return inferDitaTypeFromFileName(fileName);
+  }
   if (["html", "htm"].includes(extension)) return "html";
   return "text";
+}
+
+function inferBestProjectFileType(fileName: string, storedType = "") {
+  const extension = getFileExtension(fileName);
+  if (extension === "ditamap") return "map";
+  if (["dita", "xml"].includes(extension)) {
+    if (storedType && storedType !== "topic") return storedType;
+    return inferDitaTypeFromFileName(fileName, storedType);
+  }
+  return storedType || inferProjectFileType(fileName);
+}
+
+function inferDitaTypeFromFileName(fileName: string, storedType = "") {
+  const normalizedName = fileName.toLowerCase().replace(/\.[^./]+$/i, "");
+  const fileTypes = getActiveDitaSchemaProfile().fileTypes
+    .map((fileType) => fileType.key)
+    .filter((key) => key && key !== "topic")
+    .sort((left, right) => right.length - left.length);
+  const matchedType = fileTypes.find((typeKey) => {
+    const normalizedType = typeKey.toLowerCase();
+    const typePrefixPattern = new RegExp(`^${escapeRegExp(normalizedType)}(?:$|[-_\\d])`);
+    return normalizedName === normalizedType ||
+      typePrefixPattern.test(normalizedName) ||
+      normalizedName.startsWith(`${normalizedType}-`) ||
+      normalizedName.startsWith(`new-${normalizedType}`) ||
+      normalizedName.includes(`-${normalizedType}-`) ||
+      normalizedName.endsWith(`-${normalizedType}`);
+  });
+
+  return matchedType || storedType || "topic";
+}
+
+function inferDitaTypeFromXml(rawContent: string) {
+  const source = String(rawContent || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/^\s*<\?xml[\s\S]*?\?>/i, "")
+    .replace(/^\s*<!DOCTYPE[\s\S]*?>/i, "");
+  const match = source.match(/^\s*<([A-Za-z_][\w:.-]*)\b/);
+  return match?.[1]?.split(":").pop() || "";
 }
 
 function buildProjectTreeFromGitHubEntries(entries: GitHubTreeEntry[]) {
@@ -2154,7 +2233,7 @@ function buildProjectTreeFromGitHubEntries(entries: GitHubTreeEntry[]) {
         id: `github-file-${normalizeProjectPath(entry.path)}`,
         type: "file",
         name: fileName,
-        ditaType: entry.ditaType || inferProjectFileType(fileName),
+        ditaType: inferBestProjectFileType(fileName, entry.ditaType),
         content: "",
         checkedInAt: "GitHub",
         githubPath: normalizeProjectPath(entry.path),
@@ -2163,12 +2242,75 @@ function buildProjectTreeFromGitHubEntries(entries: GitHubTreeEntry[]) {
         githubLoaded: false,
         draftDirty: Boolean(entry.draftDirty),
         draftSavedAt: entry.draftSavedAt || null,
+        deletedAt: entry.deletedAt || null,
         sourceContentHash: entry.sourceContentHash || "",
         draftContentHash: entry.draftContentHash || "",
       });
     });
 
   return root;
+}
+
+function upsertProjectTreeFileByPath(tree, rawFilePath: string, filePatch) {
+  const filePath = normalizeProjectPath(rawFilePath);
+  const parts = filePath.split("/").filter(Boolean);
+  if (!parts.length) return tree;
+
+  function upsertIntoFolder(folder, parentPathParts: string[]) {
+    const [nextName, ...rest] = parts.slice(parentPathParts.length);
+    const nextPath = normalizeProjectPath([...parentPathParts, nextName].join("/"));
+
+    if (rest.length === 0) {
+      const existingIndex = folder.children.findIndex((child) => (
+        child.type === "file" &&
+        (normalizeProjectPath(child.githubPath || "") === filePath || child.name === nextName)
+      ));
+      const nextFile = {
+        id: existingIndex >= 0 ? folder.children[existingIndex].id : `github-file-${filePath}`,
+        type: "file",
+        name: nextName,
+        ditaType: "visual-template-binding",
+        content: "",
+        checkedInAt: "Draft",
+        githubPath: filePath,
+        githubSha: "",
+        githubLoaded: true,
+        ...filePatch,
+      };
+
+      return {
+        ...folder,
+        children: existingIndex >= 0
+          ? folder.children.map((child, index) => index === existingIndex ? { ...child, ...nextFile } : child)
+          : [...folder.children, nextFile],
+      };
+    }
+
+    const existingFolderIndex = folder.children.findIndex((child) => (
+      child.type === "folder" &&
+      (normalizeProjectPath(child.githubPath || "") === nextPath || child.name === nextName)
+    ));
+    const existingFolder = existingFolderIndex >= 0
+      ? folder.children[existingFolderIndex]
+      : {
+          id: `github-folder-${nextPath}`,
+          type: "folder",
+          name: nextName,
+          children: [],
+          githubPath: nextPath,
+          githubLoaded: true,
+        };
+    const nextFolder = upsertIntoFolder(existingFolder, [...parentPathParts, nextName]);
+
+    return {
+      ...folder,
+      children: existingFolderIndex >= 0
+        ? folder.children.map((child, index) => index === existingFolderIndex ? nextFolder : child)
+        : [...folder.children, nextFolder],
+    };
+  }
+
+  return upsertIntoFolder(tree, []);
 }
 
 function getGitHubChildPath(folder, name: string) {
@@ -2283,6 +2425,22 @@ function findFirstFile(node) {
   }
 
   return null;
+}
+
+function findFirstVisibleFile(node) {
+  if (node.type === "file") return node.deletedAt ? null : node;
+
+  for (const child of node.children) {
+    if (child.deletedAt) continue;
+    const file = findFirstVisibleFile(child);
+    if (file) return file;
+  }
+
+  return null;
+}
+
+function hasVisibleProjectChildren(node) {
+  return node.type === "folder" && node.children.some((child) => !child.deletedAt);
 }
 
 function collectProjectFileIds(node, ids = new Set<string>()) {
@@ -2546,6 +2704,18 @@ function elementChildren(node: Element): Element[] {
 
 function editableTextNodes(node: Element): ChildNode[] {
   return Array.from(node.childNodes).filter((child) => {
+    if (!elementAllowsText(node.tagName)) {
+      return child.nodeType === Node.ELEMENT_NODE;
+    }
+
+    if (
+      child.nodeType === Node.TEXT_NODE &&
+      isInlineRenderingElement(node.tagName) &&
+      !(child.textContent || "").trim()
+    ) {
+      return false;
+    }
+
     return child.nodeType === Node.TEXT_NODE || child.nodeType === Node.ELEMENT_NODE;
   });
 }
@@ -2561,13 +2731,50 @@ function getNodeByPath(doc, path) {
   return node;
 }
 
+function getPathForElement(doc: Document, target: Element): number[] | null {
+  const path: number[] = [];
+  let current: Element | null = target;
+
+  while (current && current !== doc.documentElement) {
+    const parent = current.parentElement;
+    if (!parent) return null;
+    const index = elementChildren(parent).indexOf(current);
+    if (index < 0) return null;
+    path.unshift(index);
+    current = parent;
+  }
+
+  return current === doc.documentElement ? path : null;
+}
+
+function getRelativePathForElement(root: Element, target: Element): number[] | null {
+  const path: number[] = [];
+  let current: Element | null = target;
+
+  while (current && current !== root) {
+    const parent = current.parentElement;
+    if (!parent) return null;
+    const index = elementChildren(parent).indexOf(current);
+    if (index < 0) return null;
+    path.unshift(index);
+    current = parent;
+  }
+
+  return current === root ? path : null;
+}
+
 function getAllowedChildOptions(node) {
   if (!node) return [];
 
   const definition = getElementDefinition(node.tagName);
   const allowed = definition?.children || [];
   const uniqueChildren = definition?.uniqueChildren || [];
-  const filterVisible = (options: string[]) => applyAuthoringVisibilityFilter(options, node);
+  const nodeIsDocumentRoot = node === node.ownerDocument?.documentElement || isDocumentRootElement(node.tagName);
+  const filterRootTopicCandidates = (options: string[]) => {
+    if (!nodeIsDocumentRoot || node.tagName === "map") return options;
+    return options.filter((tagName) => !isTopicRootCandidate(tagName) || tagName === node.tagName);
+  };
+  const filterVisible = (options: string[]) => applyAuthoringVisibilityFilter(filterRootTopicCandidates(options), node);
 
   if (uniqueChildren.length === 0) {
     return filterVisible(allowed);
@@ -2594,8 +2801,11 @@ function getAllowedSiblingOptions(doc, selectedPath) {
   if (!parentNode || !selectedNode) return [];
 
   const parentDefinition = getElementDefinition(parentNode.tagName);
+  const parentIsDocumentRoot = parentNode === doc.documentElement || isDocumentRootElement(parentNode.tagName);
 
   return getAllowedChildOptions(parentNode).filter((tagName) => {
+    if (parentIsDocumentRoot && isDocumentRootElement(tagName)) return false;
+
     const isAllowedByParent = getElementDefinition(parentNode.tagName)?.children?.includes(tagName);
     if (!isAllowedByParent) return false;
 
@@ -2620,14 +2830,1131 @@ function getAllowedSurroundOptions(doc, authoringSelection) {
   return getAllowedChildOptions(parentNode).filter((tagName) => isKnownInlineElement(tagName));
 }
 
+function uniqueOptions(options: string[]) {
+  return [...new Set(options)];
+}
+
+function getAuthoringInsertActions(doc, selectedPath, authoringSelection = null) {
+  const selectedNode = doc ? getNodeByPath(doc, selectedPath) : null;
+  const childOptions = getAllowedChildOptions(selectedNode);
+  const siblingOptions = getAllowedSiblingOptions(doc, selectedPath);
+  const surroundOptions = getAllowedSurroundOptions(doc, authoringSelection);
+
+  return {
+    selectedNode,
+    childOptions,
+    siblingOptions,
+    surroundOptions,
+    ribbonOptions: uniqueOptions([
+      ...childOptions,
+      ...siblingOptions,
+      ...surroundOptions,
+    ]),
+  };
+}
+
+type TableCommand =
+  | "insert-column-before"
+  | "insert-column-after"
+  | "insert-row-before"
+  | "insert-row-after"
+  | "delete-column"
+  | "delete-row"
+  | "merge-right"
+  | "merge-left"
+  | "split-cells";
+
+type TableContext = {
+  canEditColumns: boolean;
+  cellPath: number[] | null;
+  columnIndex: number;
+  label: string;
+  model: "cals" | "simple" | "choice" | "properties";
+  rowPath: number[] | null;
+  tablePath: number[];
+};
+
+function hasSchemaChild(tagName: string, childName: string): boolean {
+  return Boolean(getElementDefinition(tagName)?.children?.includes(childName));
+}
+
+function getTableModelForRow(tagName: string): TableContext["model"] | null {
+  if (tagName === "row" || hasSchemaChild(tagName, "entry")) return "cals";
+  if (tagName === "strow" || hasSchemaChild(tagName, "stentry")) return "simple";
+  if (tagName === "chrow" || (hasSchemaChild(tagName, "choption") && hasSchemaChild(tagName, "chdesc"))) return "choice";
+  if (tagName === "property" || (hasSchemaChild(tagName, "proptype") && hasSchemaChild(tagName, "propvalue"))) return "properties";
+  return null;
+}
+
+function getTableModelForTable(tagName: string): TableContext["model"] | null {
+  if (tagName === "table" || tagName === "tgroup" || hasSchemaChild(tagName, "tgroup")) return "cals";
+  if (tagName === "simpletable" || hasSchemaChild(tagName, "strow")) return "simple";
+  if (tagName === "choicetable" || hasSchemaChild(tagName, "chrow")) return "choice";
+  if (tagName === "properties" || hasSchemaChild(tagName, "property")) return "properties";
+  return null;
+}
+
+function getTableCellTags(model: TableContext["model"]): string[] {
+  if (model === "cals") return ["entry"];
+  if (model === "simple") return ["stentry"];
+  if (model === "choice") return ["choption", "chdesc"];
+  return ["proptype", "propvalue", "propdesc"];
+}
+
+function isTableCellForModel(tagName: string, model: TableContext["model"]) {
+  return getTableCellTags(model).includes(tagName);
+}
+
+function getTableRows(table: Element, model: TableContext["model"]): Element[] {
+  const rowTag = model === "cals"
+    ? "row"
+    : model === "simple"
+      ? "strow"
+      : model === "choice"
+        ? "chrow"
+        : "property";
+
+  return Array.from(table.getElementsByTagName(rowTag));
+}
+
+function isTableContainerElement(tagName: string): boolean {
+  return Boolean(getTableModelForTable(tagName) || ["tbody", "thead", "tgroup"].includes(tagName));
+}
+
+function isTableRowElement(tagName: string): boolean {
+  return Boolean(getTableModelForRow(tagName));
+}
+
+function isTableCellElement(tagName: string): boolean {
+  return ["entry", "stentry", "choption", "chdesc", "proptype", "propvalue", "propdesc"].includes(tagName);
+}
+
+function isVisualMetadataElement(tagName: string): boolean {
+  return tagName === "colspec";
+}
+
+function getRowCells(row: Element, model: TableContext["model"]): Element[] {
+  const cellTags = getTableCellTags(model);
+  return elementChildren(row).filter((child) => cellTags.includes(child.tagName));
+}
+
+function createTableRowElement(doc: Document, rowTagName: string, referenceRow: Element | null = null): Element | null {
+  const model = getTableModelForRow(rowTagName);
+  if (!model) return null;
+
+  const row = doc.createElement(rowTagName);
+  const fixedCellTags = model === "choice" || model === "properties" ? getTableCellTags(model) : null;
+  const referenceCells = referenceRow ? getRowCells(referenceRow, model) : [];
+  const fallbackCellCount = model === "cals" || model === "simple" ? Math.max(1, referenceCells.length || 2) : 0;
+  const cellTags = fixedCellTags || Array.from({ length: fallbackCellCount }, () => getTableCellTags(model)[0]);
+
+  for (const cellTag of cellTags) {
+    row.append(createElementFor(doc, cellTag));
+  }
+
+  return row;
+}
+
+function syncCalsTgroupColumnCount(model: TableContext["model"], table: Element) {
+  if (model !== "cals") return;
+
+  const rows = getTableRows(table, model);
+  const maxColumns = Math.max(1, ...rows.map((row) => getRowCells(row, model).length));
+  const tgroup = table.tagName === "tgroup" ? table : table.getElementsByTagName("tgroup")[0];
+  if (tgroup) {
+    tgroup.setAttribute("cols", String(maxColumns));
+  }
+}
+
+function calsTableHasSpans(table: Element): boolean {
+  return Array.from(table.getElementsByTagName("entry")).some((entry) => (
+    entry.hasAttribute("namest") ||
+    entry.hasAttribute("nameend") ||
+    entry.hasAttribute("spanname") ||
+    Number(entry.getAttribute("morerows") || 0) > 0
+  ));
+}
+
+function getCalsTgroup(table: Element): Element | null {
+  return table.tagName === "tgroup" ? table : table.getElementsByTagName("tgroup")[0] || null;
+}
+
+function getCalsColspecs(table: Element): Element[] {
+  const tgroup = getCalsTgroup(table);
+  return tgroup ? Array.from(tgroup.children).filter((child) => child.tagName === "colspec") : [];
+}
+
+function getCalsColumnNames(table: Element) {
+  const tgroup = getCalsTgroup(table);
+  const colspecs = getCalsColspecs(table);
+  const cols = Math.max(
+    Number(tgroup?.getAttribute("cols") || 0),
+    colspecs.length,
+    1,
+  );
+
+  return Array.from({ length: cols }, (_, index) => (
+    colspecs[index]?.getAttribute("colname") || `col${index + 1}`
+  ));
+}
+
+function getUniqueCalsColname(existingNames: string[], preferredIndex: number) {
+  let index = preferredIndex + 1;
+  let candidate = `col${index}`;
+  while (existingNames.includes(candidate)) {
+    index += 1;
+    candidate = `col${index}`;
+  }
+  return candidate;
+}
+
+function createCalsColspec(doc: Document, colIndex: number) {
+  const colspec = doc.createElement("colspec");
+  colspec.setAttribute("colname", `col${colIndex + 1}`);
+  return colspec;
+}
+
+function createCalsRowWithColumnCount(doc: Document, columnCount: number) {
+  const row = doc.createElement("row");
+  const safeColumnCount = Math.max(1, columnCount);
+  for (let index = 0; index < safeColumnCount; index += 1) {
+    row.append(createElementFor(doc, "entry"));
+  }
+  return row;
+}
+
+function getCalsDeclaredColumnCount(tgroup: Element) {
+  return Math.max(1, Number(tgroup.getAttribute("cols") || 0));
+}
+
+function ensureCalsSectionRows(section: Element, tgroup: Element) {
+  const columnCount = getCalsDeclaredColumnCount(tgroup);
+  const rows = Array.from(section.children).filter((child) => child.tagName === "row") as Element[];
+
+  if (!rows.length) {
+    section.append(createCalsRowWithColumnCount(section.ownerDocument, columnCount));
+    return;
+  }
+
+  rows.forEach((row) => {
+    const cells = getRowCells(row, "cals");
+    while (getRowCells(row, "cals").length < columnCount) {
+      row.append(createElementFor(section.ownerDocument, "entry"));
+    }
+
+    cells.slice(columnCount).forEach((cell) => {
+      if (isEmptyElement(cell)) {
+        cell.remove();
+      }
+    });
+  });
+}
+
+function insertCalsTheadIntoTgroup(tgroup: Element, thead: Element) {
+  ensureCalsSectionRows(thead, tgroup);
+  const tbody = elementChildren(tgroup).find((child) => child.tagName === "tbody") || null;
+  tgroup.insertBefore(thead, tbody);
+}
+
+function ensureCalsColspecs(table: Element, doc: Document) {
+  const tgroup = getCalsTgroup(table);
+  if (!tgroup) return [];
+
+  const targetCols = Math.max(Number(tgroup.getAttribute("cols") || 0), getCalsColspecs(table).length, 1);
+  let colspecs = getCalsColspecs(table);
+  if (colspecs.length >= targetCols) return colspecs;
+
+  for (let index = colspecs.length; index < targetCols; index += 1) {
+    const colspec = createCalsColspec(doc, index);
+    const insertBefore = Array.from(tgroup.children).find((child) => child.tagName !== "colspec") || null;
+    tgroup.insertBefore(colspec, insertBefore);
+  }
+
+  colspecs = getCalsColspecs(table);
+  return colspecs;
+}
+
+function getCalsEntrySpan(entry: Element, columnNames: string[], fallbackColumn: number) {
+  const nameToIndex = new Map(columnNames.map((name, index) => [name, index]));
+  const namest = entry.getAttribute("namest");
+  const nameend = entry.getAttribute("nameend");
+  const colname = entry.getAttribute("colname");
+  let startCol = fallbackColumn;
+  let endCol = fallbackColumn;
+
+  if (namest && nameToIndex.has(namest)) {
+    startCol = nameToIndex.get(namest) ?? fallbackColumn;
+    endCol = nameend && nameToIndex.has(nameend)
+      ? nameToIndex.get(nameend) ?? startCol
+      : startCol;
+  } else if (colname && nameToIndex.has(colname)) {
+    startCol = nameToIndex.get(colname) ?? fallbackColumn;
+    endCol = startCol;
+  }
+
+  if (endCol < startCol) {
+    [startCol, endCol] = [endCol, startCol];
+  }
+
+  return {
+    endCol,
+    morerows: Math.max(0, Number(entry.getAttribute("morerows") || 0)),
+    startCol,
+  };
+}
+
+function findAncestorByTagName(node: Element | null | undefined, tagName: string): Element | null {
+  let current = node?.parentElement || null;
+  while (current) {
+    if (current.tagName === tagName) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function getCalsRowOccupiedColumnCount(row: Element, columnNames: string[]): number {
+  let currentColumn = 0;
+  getRowCells(row, "cals").forEach((entry) => {
+    const span = getCalsEntrySpan(entry, columnNames, currentColumn);
+    currentColumn = Math.max(currentColumn, span.endCol + 1);
+  });
+  return currentColumn;
+}
+
+function getCalsSequentialRowCells(row: Element, columnNames: string[]) {
+  let currentColumn = 0;
+  return getRowCells(row, "cals").map((entry) => {
+    const span = getCalsEntrySpan(entry, columnNames, currentColumn);
+    currentColumn = Math.max(currentColumn, span.endCol + 1);
+    return { entry, ...span };
+  });
+}
+
+function mergeCalsEntryContent(targetEntry: Element, coveredEntry: Element) {
+  if (isEmptyElement(coveredEntry)) return;
+
+  const targetHasContent = Boolean((targetEntry.textContent || "").trim()) || elementChildren(targetEntry).length > 0;
+  const coveredHasLeadingText = coveredEntry.firstChild?.nodeType === Node.TEXT_NODE;
+  if (targetHasContent && coveredHasLeadingText) {
+    targetEntry.appendChild(targetEntry.ownerDocument.createTextNode(" "));
+  }
+
+  while (coveredEntry.firstChild) {
+    targetEntry.appendChild(coveredEntry.firstChild);
+  }
+}
+
+function compactCalsFullyMergedColumns(tgroup: Element) {
+  const columnNames = getCalsColumnNames(tgroup);
+  if (columnNames.length <= 1) return;
+
+  const rows = getTableRows(tgroup, "cals");
+  if (rows.length <= 1) return;
+
+  const rowEntries = rows.map((row) => getRowCells(row, "cals"));
+  const everyRowIsFullyMerged = rowEntries.every((entries, rowIndex) => {
+    if (entries.length !== 1) return false;
+    const span = getCalsEntrySpan(entries[0], columnNames, 0);
+    return span.startCol === 0 && span.endCol === columnNames.length - 1;
+  });
+
+  if (!everyRowIsFullyMerged) return;
+
+  tgroup.setAttribute("cols", "1");
+  const colspecs = getCalsColspecs(tgroup);
+  if (colspecs[0]) {
+    colspecs[0].setAttribute("colname", "col1");
+  } else {
+    const insertBefore = Array.from(tgroup.children).find((child) => child.tagName !== "colspec") || null;
+    tgroup.insertBefore(createCalsColspec(tgroup.ownerDocument, 0), insertBefore);
+  }
+
+  getCalsColspecs(tgroup).slice(1).forEach((colspec) => colspec.remove());
+  rowEntries.forEach(([entry]) => {
+    entry.removeAttribute("colname");
+    entry.removeAttribute("namest");
+    entry.removeAttribute("nameend");
+  });
+}
+
+function normalizeCalsRowAfterHorizontalSpanEdit(doc: Document, entry: Element) {
+  const row = entry.parentElement?.tagName === "row" ? entry.parentElement : null;
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  if (!row || !tgroup) return;
+
+  const columnNames = getCalsColumnNames(tgroup);
+  const columnCount = columnNames.length;
+  let currentColumn = 0;
+
+  for (const currentEntry of getRowCells(row, "cals")) {
+    const span = getCalsEntrySpan(currentEntry, columnNames, currentColumn);
+    const startsBeyondTable = span.startCol >= columnCount;
+    const overlapsEarlierEntry = span.startCol < currentColumn;
+    const overflowsTable = span.endCol >= columnCount;
+
+    if (
+      currentEntry !== entry &&
+      (startsBeyondTable || overlapsEarlierEntry || overflowsTable)
+    ) {
+      mergeCalsEntryContent(entry, currentEntry);
+      currentEntry.remove();
+      continue;
+    }
+
+    currentColumn = Math.max(currentColumn, span.endCol + 1);
+  }
+
+  let occupiedColumnCount = getCalsRowOccupiedColumnCount(row, columnNames);
+  while (occupiedColumnCount < columnCount) {
+    row.append(createElementFor(doc, "entry"));
+    occupiedColumnCount += 1;
+  }
+
+  compactCalsFullyMergedColumns(tgroup);
+}
+
+function restoreAttributeValue(element: Element, name: string, value: string | null) {
+  if (value === null) {
+    element.removeAttribute(name);
+  } else {
+    element.setAttribute(name, value);
+  }
+}
+
+function getCalsHorizontalSpanIssue(entry: Element, editedAttribute: string, previousValue: string | null): string | null {
+  const row = entry.parentElement?.tagName === "row" ? entry.parentElement : null;
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  if (!row || !tgroup) return null;
+
+  const columnNames = getCalsColumnNames(tgroup);
+  const desiredTargetCell = getCalsSequentialRowCells(row, columnNames).find((cell) => cell.entry === entry);
+  if (!desiredTargetCell) return "Could not resolve the selected table cell.";
+
+  const currentValue = entry.getAttribute(editedAttribute);
+  restoreAttributeValue(entry, editedAttribute, previousValue);
+  const baseRowCells = getCalsSequentialRowCells(row, columnNames);
+  restoreAttributeValue(entry, editedAttribute, currentValue);
+
+  const coveredCells = baseRowCells.filter((cell) => (
+    cell.entry !== entry &&
+    cell.startCol <= desiredTargetCell.endCol &&
+    cell.endCol >= desiredTargetCell.startCol
+  ));
+
+  const spanningMoreRows = desiredTargetCell.morerows;
+  const mismatchedRowSpan = coveredCells.find((cell) => {
+    const coveredMoreRows = Number(cell.entry.getAttribute("morerows") || 0);
+    return !(spanningMoreRows === 0 && coveredMoreRows === 0) && coveredMoreRows !== spanningMoreRows;
+  });
+
+  if (mismatchedRowSpan) {
+    return `Cannot merge cells with different morerows values. Set both cells to the same morerows value, or clear morerows on both cells first.`;
+  }
+
+  return null;
+}
+
+function getCalsVerticalSpanBaseContext(entry: Element, requestedMoreRows: number) {
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  const currentValue = entry.getAttribute("morerows");
+  if (!tgroup) return null;
+
+  entry.removeAttribute("morerows");
+  const grid = resolveCalsGrid(tgroup);
+  if (currentValue === null) {
+    entry.removeAttribute("morerows");
+  } else {
+    entry.setAttribute("morerows", currentValue);
+  }
+
+  if (!grid.valid) return null;
+
+  const targetCell = getCalsGridCellForEntry(grid, entry);
+  if (!targetCell) return null;
+
+  return {
+    grid,
+    requestedMoreRows,
+    targetCell,
+  };
+}
+
+function getCalsVerticalSpanIssue(entry: Element): string | null {
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  if (!tgroup) return null;
+
+  const requestedMoreRows = Number(entry.getAttribute("morerows") || 0);
+  if (requestedMoreRows <= 0) return null;
+
+  const context = getCalsVerticalSpanBaseContext(entry, requestedMoreRows);
+  if (!context) return "Could not resolve the selected table cell.";
+
+  const { grid, targetCell } = context;
+  if (targetCell.rowIndex + requestedMoreRows >= grid.rows.length) {
+    return `morerows="${requestedMoreRows}" requires ${requestedMoreRows} row${requestedMoreRows === 1 ? "" : "s"} below the current row.`;
+  }
+
+  for (let offset = 1; offset <= requestedMoreRows; offset += 1) {
+    const targetRowIndex = targetCell.rowIndex + offset;
+    const rowCells = grid.rows[targetRowIndex]?.cells || [];
+    const coveredCells = rowCells.filter((cell) => (
+      cell.startCol <= targetCell.endCol && cell.endCol >= targetCell.startCol
+    ));
+    const matchingFootprintCell = coveredCells.length === 1 &&
+      coveredCells[0].startCol === targetCell.startCol &&
+      coveredCells[0].endCol === targetCell.endCol;
+
+    if (!matchingFootprintCell) {
+      return `morerows="${requestedMoreRows}" requires the cell below in row ${targetRowIndex + 1} to have the same column span.`;
+    }
+
+    const rowIsFullyCovered = coveredCells.length === rowCells.length;
+    const nonEmptyCoveredCell = coveredCells.find((cell) => !isEmptyElement(cell.entry));
+    if (!rowIsFullyCovered && nonEmptyCoveredCell) {
+      return `morerows="${requestedMoreRows}" would overlap non-empty content in row ${targetRowIndex + 1}.`;
+    }
+  }
+
+  return null;
+}
+
+function decrementCalsSpansCrossingRemovedRows(tgroup: Element, removedRowIndexes: number[]) {
+  if (!removedRowIndexes.length) return;
+
+  const grid = resolveCalsGrid(tgroup);
+  if (!grid.valid) return;
+
+  const decrementCounts = new Map<Element, number>();
+  removedRowIndexes.forEach((removedRowIndex) => {
+    const entriesCrossingRow = new Set<Element>();
+    (grid.rows[removedRowIndex]?.slots || []).forEach((cell) => {
+      if (cell && cell.rowIndex < removedRowIndex && cell.endRow >= removedRowIndex) {
+        entriesCrossingRow.add(cell.entry);
+      }
+    });
+    entriesCrossingRow.forEach((entry) => {
+      decrementCounts.set(entry, (decrementCounts.get(entry) || 0) + 1);
+    });
+  });
+
+  decrementCounts.forEach((count, spanningEntry) => {
+    const currentMoreRows = Number(spanningEntry.getAttribute("morerows") || 0);
+    const nextMoreRows = Math.max(0, currentMoreRows - count);
+    if (nextMoreRows > 0) {
+      spanningEntry.setAttribute("morerows", String(nextMoreRows));
+    } else {
+      spanningEntry.removeAttribute("morerows");
+    }
+  });
+}
+
+function normalizeCalsRowsAfterVerticalSpanEdit(entry: Element) {
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  const requestedMoreRows = Number(entry.getAttribute("morerows") || 0);
+  if (!tgroup || requestedMoreRows <= 0) return;
+
+  const context = getCalsVerticalSpanBaseContext(entry, requestedMoreRows);
+  if (!context) return;
+
+  const { grid, targetCell } = context;
+  if (targetCell.rowIndex + requestedMoreRows >= grid.rows.length) return;
+
+  const rowIndexesToRemove: number[] = [];
+  const rowsToRemove: Element[] = [];
+  const cellsToRemove: Element[] = [];
+
+  for (let offset = 1; offset <= requestedMoreRows; offset += 1) {
+    const rowGrid = grid.rows[targetCell.rowIndex + offset];
+    const rowCells = rowGrid?.cells || [];
+    const coveredCells = rowCells.filter((cell) => (
+      cell.startCol <= targetCell.endCol && cell.endCol >= targetCell.startCol
+    ));
+    if (rowCells.length && coveredCells.length === rowCells.length) {
+      rowIndexesToRemove.push(rowGrid.rowIndex);
+      rowsToRemove.push(rowGrid.row);
+    } else {
+      coveredCells
+        .filter((cell) => isEmptyElement(cell.entry))
+        .forEach((cell) => cellsToRemove.push(cell.entry));
+    }
+  }
+
+  decrementCalsSpansCrossingRemovedRows(tgroup, rowIndexesToRemove);
+  rowsToRemove.forEach((row) => row.remove());
+  cellsToRemove.forEach((cell) => cell.remove());
+}
+
+function insertCalsEntriesAtColumn(doc: Document, rowGrid, insertBeforeCol: number, count: number) {
+  const { nextCell, previousCell } = getCalsInsertReferenceCell(rowGrid, insertBeforeCol - 1);
+  let lastInserted: Element | null = null;
+
+  for (let index = 0; index < count; index += 1) {
+    const newCell = createElementFor(doc, "entry");
+    if (nextCell?.entry) {
+      rowGrid.row.insertBefore(newCell, nextCell.entry);
+    } else if (lastInserted) {
+      rowGrid.row.insertBefore(newCell, lastInserted.nextSibling);
+    } else if (previousCell?.entry) {
+      rowGrid.row.insertBefore(newCell, previousCell.entry.nextSibling);
+    } else {
+      rowGrid.row.appendChild(newCell);
+    }
+    lastInserted = newCell;
+  }
+}
+
+function splitCalsSpannedCell(doc: Document, entry: Element) {
+  const tgroup = findAncestorByTagName(entry, "tgroup");
+  if (!tgroup) return false;
+
+  const grid = resolveCalsGrid(tgroup);
+  if (!grid.valid) return false;
+
+  const selectedCell = getCalsGridCellForEntry(grid, entry);
+  if (!selectedCell) return false;
+
+  const colSpan = selectedCell.endCol - selectedCell.startCol + 1;
+  const rowSpan = selectedCell.rowSpan;
+  if (colSpan <= 1 && rowSpan <= 1) return false;
+
+  entry.removeAttribute("colname");
+  entry.removeAttribute("namest");
+  entry.removeAttribute("nameend");
+  entry.removeAttribute("morerows");
+
+  let lastInserted: Element = entry;
+  for (let index = 1; index < colSpan; index += 1) {
+    const restoredEntry = createElementFor(doc, "entry");
+    selectedCell.row.insertBefore(restoredEntry, lastInserted.nextSibling);
+    lastInserted = restoredEntry;
+  }
+
+  const columnCount = grid.columnCount || getCalsDeclaredColumnCount(tgroup);
+  let insertionAnchor = selectedCell.row;
+  for (let rowIndex = selectedCell.rowIndex + 1; rowIndex <= selectedCell.endRow; rowIndex += 1) {
+    const rowGrid = grid.rows[rowIndex];
+    if (rowGrid?.row?.parentNode) {
+      insertCalsEntriesAtColumn(doc, rowGrid, selectedCell.startCol, colSpan);
+      insertionAnchor = rowGrid.row;
+      continue;
+    }
+
+    const restoredRow = createCalsRowWithColumnCount(doc, columnCount);
+    insertionAnchor.parentNode?.insertBefore(restoredRow, insertionAnchor.nextSibling);
+    insertionAnchor = restoredRow;
+  }
+
+  return true;
+}
+
+function validateCalsEntrySpans(table: Element) {
+  const columnNames = getCalsColumnNames(table);
+  const columnNameSet = new Set(columnNames);
+  const issues: string[] = [];
+
+  getTableRows(table, "cals").forEach((row, rowIndex) => {
+    getRowCells(row, "cals").forEach((entry, entryIndex) => {
+      const label = `row ${rowIndex + 1}, entry ${entryIndex + 1}`;
+      const colname = entry.getAttribute("colname");
+      const namest = entry.getAttribute("namest");
+      const nameend = entry.getAttribute("nameend");
+      const morerows = entry.getAttribute("morerows");
+
+      if (colname && !columnNameSet.has(colname)) {
+        issues.push(`${label} references unknown colname "${colname}".`);
+      }
+
+      if (namest && !columnNameSet.has(namest)) {
+        issues.push(`${label} references unknown namest "${namest}".`);
+      }
+
+      if (nameend && !columnNameSet.has(nameend)) {
+        issues.push(`${label} references unknown nameend "${nameend}".`);
+      }
+
+      if (namest && nameend && columnNameSet.has(namest) && columnNameSet.has(nameend)) {
+        const startIndex = columnNames.indexOf(namest);
+        const endIndex = columnNames.indexOf(nameend);
+        if (startIndex > endIndex) {
+          issues.push(`${label} has namest after nameend.`);
+        }
+      }
+
+      if (morerows && (!/^\d+$/.test(morerows) || Number(morerows) < 0)) {
+        issues.push(`${label} has invalid morerows "${morerows}".`);
+      }
+    });
+  });
+
+  return {
+    issues,
+    valid: issues.length === 0,
+  };
+}
+
+function resolveCalsGrid(table: Element) {
+  const validation = validateCalsEntrySpans(table);
+  if (!validation.valid) {
+    return {
+      columnCount: 0,
+      columnNames: [],
+      rows: [],
+      valid: false,
+      validationIssues: validation.issues,
+    };
+  }
+
+  const columnNames = getCalsColumnNames(table);
+  const rows = getTableRows(table, "cals");
+  const activeSpans: Array<any | null> = [];
+  const resolvedRows = [];
+
+  rows.forEach((row, rowIndex) => {
+    const entries = getRowCells(row, "cals");
+    const slots: Array<any | null> = [];
+    const rowCells = [];
+    const nextSpans = activeSpans.map((span) => (
+      span && span.remaining > 1 ? { ...span, remaining: span.remaining - 1 } : null
+    ));
+
+    activeSpans.forEach((span, columnIndex) => {
+      if (span?.cell) {
+        slots[columnIndex] = span.cell;
+      }
+    });
+
+    let searchColumn = 0;
+    entries.forEach((entry) => {
+      while (slots[searchColumn]) searchColumn += 1;
+
+      const span = getCalsEntrySpan(entry, columnNames, searchColumn);
+      const cell = {
+        endCol: span.endCol,
+        endRow: rowIndex + span.morerows,
+        entry,
+        row,
+        rowIndex,
+        rowSpan: span.morerows + 1,
+        startCol: span.startCol,
+      };
+
+      rowCells.push(cell);
+
+      for (let columnIndex = span.startCol; columnIndex <= span.endCol; columnIndex += 1) {
+        slots[columnIndex] = cell;
+        if (span.morerows > 0) {
+          nextSpans[columnIndex] = { cell, remaining: span.morerows };
+        }
+      }
+
+      searchColumn = span.endCol + 1;
+    });
+
+    resolvedRows.push({ cells: rowCells, row, rowIndex, slots });
+    activeSpans.splice(0, activeSpans.length, ...nextSpans);
+  });
+
+  return {
+    columnCount: Math.max(columnNames.length, ...resolvedRows.map((row) => row.slots.length)),
+    columnNames,
+    rows: resolvedRows,
+    valid: true,
+    validationIssues: [],
+  };
+}
+
+function getCalsGridCellForEntry(grid, entry: Element) {
+  for (const row of grid.rows) {
+    const cell = row.cells.find((candidate) => candidate.entry === entry);
+    if (cell) return cell;
+  }
+  return null;
+}
+
+function insertCalsColspecAfter(table: Element, doc: Document, insertAfterCol: number) {
+  const tgroup = getCalsTgroup(table);
+  if (!tgroup) return null;
+
+  const colspecs = ensureCalsColspecs(table, doc);
+  const nextCols = Math.max(Number(tgroup.getAttribute("cols") || 0), colspecs.length, insertAfterCol + 1) + 1;
+  tgroup.setAttribute("cols", String(nextCols));
+
+  const columnNames = getCalsColumnNames(table);
+  const newColspec = doc.createElement("colspec");
+  newColspec.setAttribute("colname", getUniqueCalsColname(columnNames, insertAfterCol + 1));
+
+  if (insertAfterCol < 0) {
+    const firstColspec = colspecs[0] || Array.from(tgroup.children).find((child) => child.tagName !== "colspec") || null;
+    tgroup.insertBefore(newColspec, firstColspec);
+  } else {
+    const referenceColspec = colspecs[insertAfterCol] || colspecs.at(-1) || null;
+    if (referenceColspec) {
+    tgroup.insertBefore(newColspec, referenceColspec.nextSibling);
+    } else {
+      tgroup.insertBefore(newColspec, tgroup.firstChild);
+    }
+  }
+
+  return newColspec;
+}
+
+function deleteCalsColspecAt(table: Element, columnIndex: number) {
+  const tgroup = getCalsTgroup(table);
+  if (!tgroup) return;
+
+  const colspecs = getCalsColspecs(table);
+  const colspec = colspecs[columnIndex];
+  if (colspec?.parentNode) {
+    colspec.parentNode.removeChild(colspec);
+  }
+}
+
+function getCalsInsertReferenceCell(rowGrid, insertAfterCol: number) {
+  const rowOwnedCells = rowGrid.cells;
+  const previousCell = [...rowOwnedCells].reverse().find((cell) => cell.endCol <= insertAfterCol) || null;
+  const nextCell = rowOwnedCells.find((cell) => cell.startCol > insertAfterCol) || null;
+  return { nextCell, previousCell };
+}
+
+function insertCalsColumnAfterIndex(
+  doc: Document,
+  table: Element,
+  insertAfterCol: number,
+  selectedRow: Element | null = null,
+) {
+  const grid = resolveCalsGrid(table);
+  if (!grid.valid) return null;
+
+  const newColspec = insertCalsColspecAfter(table, doc, insertAfterCol);
+  if (!newColspec) return null;
+
+  let selectedRowNewCell: Element | null = null;
+  for (const rowGrid of grid.rows) {
+    const crossingSpan = rowGrid.slots.find((cell) => (
+      cell && cell.startCol <= insertAfterCol && cell.endCol > insertAfterCol
+    ));
+    if (crossingSpan) continue;
+
+    const newCell = createElementFor(doc, "entry");
+    const { nextCell, previousCell } = getCalsInsertReferenceCell(rowGrid, insertAfterCol);
+
+    if (nextCell?.entry) {
+      rowGrid.row.insertBefore(newCell, nextCell.entry);
+    } else if (previousCell?.entry) {
+      rowGrid.row.insertBefore(newCell, previousCell.entry.nextSibling);
+    } else {
+      rowGrid.row.appendChild(newCell);
+    }
+
+    if (selectedRow && rowGrid.row === selectedRow) {
+      selectedRowNewCell = newCell;
+    }
+  }
+
+  return { newColspec, selectedRowNewCell };
+}
+
+function insertCalsColumnAfterCell(doc: Document, selectedPath: number[]): number[] | null | undefined {
+  const selectedNode = getNodeByPath(doc, selectedPath);
+  const context = findNearestTableContext(doc, selectedPath);
+  if (!selectedNode || context?.model !== "cals") return undefined;
+  if (!isTableCellForModel(selectedNode.tagName, context.model)) return undefined;
+
+  const table = getNodeByPath(doc, context.tablePath);
+  if (!table) return null;
+
+  const grid = resolveCalsGrid(table);
+  const selectedGridCell = getCalsGridCellForEntry(grid, selectedNode);
+  if (!selectedGridCell) return null;
+
+  const insertAfterCol = selectedGridCell.endCol;
+  const result = insertCalsColumnAfterIndex(doc, table, insertAfterCol, selectedGridCell.row);
+  const selectedRowNewCell = result?.selectedRowNewCell || null;
+
+  return selectedRowNewCell ? getPathForElement(doc, selectedRowNewCell) : context.tablePath;
+}
+
+function insertTableColumnAfterCell(doc: Document, selectedPath: number[], cellTagName: string): number[] | null | undefined {
+  const selectedNode = getNodeByPath(doc, selectedPath);
+  const context = findNearestTableContext(doc, selectedPath);
+  if (!selectedNode || !context?.canEditColumns) return undefined;
+  if (!isTableCellForModel(selectedNode.tagName, context.model) || !isTableCellForModel(cellTagName, context.model)) {
+    return undefined;
+  }
+
+  if (context.model === "cals") {
+    return insertCalsColumnAfterCell(doc, selectedPath);
+  }
+
+  const table = getNodeByPath(doc, context.tablePath);
+  if (!table) return null;
+
+  const rows = getTableRows(table, context.model);
+  const columnIndex = Math.max(0, context.columnIndex);
+  let selectedRowNewCell: Element | null = null;
+
+  for (const currentRow of rows) {
+    const cells = getRowCells(currentRow, context.model);
+    const referenceCell = cells[Math.min(columnIndex, Math.max(0, cells.length - 1))] || null;
+    const newCell = createElementFor(doc, cellTagName);
+
+    if (referenceCell) {
+      currentRow.insertBefore(newCell, referenceCell.nextSibling);
+    } else {
+      currentRow.appendChild(newCell);
+    }
+
+    const currentRowPath = context.rowPath ? getPathForElement(doc, currentRow) : null;
+    if (currentRowPath?.join(".") === context.rowPath?.join(".")) {
+      selectedRowNewCell = newCell;
+    }
+  }
+
+  syncCalsTgroupColumnCount(context.model, table);
+  return selectedRowNewCell ? getPathForElement(doc, selectedRowNewCell) : context.tablePath;
+}
+
+function deleteTableColumnAtCell(doc: Document, selectedPath: number[]): number[] | null | undefined {
+  const selectedNode = getNodeByPath(doc, selectedPath);
+  const context = findNearestTableContext(doc, selectedPath);
+  if (!selectedNode || !context?.canEditColumns) return undefined;
+  if (!isTableCellForModel(selectedNode.tagName, context.model)) return undefined;
+
+  const table = getNodeByPath(doc, context.tablePath);
+  if (!table) return null;
+  if (context.model === "cals" && calsTableHasSpans(table)) return null;
+
+  const rows = getTableRows(table, context.model);
+  if (!rows.length) return null;
+
+  const columnIndex = Math.max(0, context.columnIndex);
+  const maxColumns = Math.max(0, ...rows.map((row) => getRowCells(row, context.model).length));
+  if (maxColumns <= 1) return context.tablePath;
+
+  if (context.model === "cals") {
+    ensureCalsColspecs(table, doc);
+    deleteCalsColspecAt(table, columnIndex);
+  }
+
+  for (const currentRow of rows) {
+    const cells = getRowCells(currentRow, context.model);
+    const cell = cells[columnIndex];
+    if (cell?.parentNode) {
+      cell.parentNode.removeChild(cell);
+    }
+  }
+
+  syncCalsTgroupColumnCount(context.model, table);
+  return context.tablePath;
+}
+
+function findNearestTableContext(doc: Document | null, selectedPath: number[] = []): TableContext | null {
+  if (!doc?.documentElement) return null;
+
+  const ancestry = selectedPath
+    .map((_, index) => selectedPath.slice(0, index + 1))
+    .reverse();
+  ancestry.push([]);
+
+  let rowPath: number[] | null = null;
+  let cellPath: number[] | null = null;
+  let model: TableContext["model"] | null = null;
+
+  for (const path of ancestry) {
+    const node = getNodeByPath(doc, path);
+    if (!node) continue;
+
+    if (!cellPath && model && isTableCellForModel(node.tagName, model)) {
+      cellPath = path;
+    }
+
+    const rowModel = getTableModelForRow(node.tagName);
+    if (!rowPath && rowModel) {
+      rowPath = path;
+      model = rowModel;
+      const selectedNode = getNodeByPath(doc, selectedPath);
+      if (selectedNode && isTableCellForModel(selectedNode.tagName, model)) {
+        cellPath = selectedPath;
+      }
+    }
+  }
+
+  for (const path of ancestry) {
+    const node = getNodeByPath(doc, path);
+    if (!node) continue;
+    const tableModel = getTableModelForTable(node.tagName);
+    if (!tableModel) continue;
+
+    const resolvedModel = model || tableModel;
+    const row = rowPath ? getNodeByPath(doc, rowPath) : null;
+    const rowCells = row ? getRowCells(row, resolvedModel) : [];
+    const resolvedCellPath = cellPath || rowCells
+      .map((cell) => getPathForElement(doc, cell))
+      .find((candidatePath) => candidatePath && pathStartsWith(selectedPath, candidatePath)) || null;
+    const cell = resolvedCellPath ? getNodeByPath(doc, resolvedCellPath) : null;
+    const columnIndex = cell && rowCells.includes(cell)
+      ? rowCells.indexOf(cell)
+      : Math.max(0, rowCells.length - 1);
+
+    return {
+      canEditColumns: resolvedModel === "cals" || resolvedModel === "simple",
+      cellPath: resolvedCellPath,
+      columnIndex,
+      label: node.tagName,
+      model: resolvedModel,
+      rowPath,
+      tablePath: path,
+    };
+  }
+
+  return null;
+}
+
+function getTableCommandValidation(doc: Document | null, selectedPath: number[], command: TableCommand) {
+  const context = findNearestTableContext(doc, selectedPath);
+  if (!doc || !context) return { enabled: false, reason: "No table selected." };
+
+  const table = getNodeByPath(doc, context.tablePath);
+  const row = context.rowPath ? getNodeByPath(doc, context.rowPath) : null;
+  const cell = context.cellPath ? getNodeByPath(doc, context.cellPath) : null;
+  if (!table) return { enabled: false, reason: "No table selected." };
+
+  if (command === "insert-row-before" || command === "insert-row-after") {
+    return row
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "Select a table row or cell first." };
+  }
+
+  if (command === "delete-row") {
+    return row
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "Select a table row or cell first." };
+  }
+
+  if (!context.canEditColumns || !cell || !isTableCellForModel(cell.tagName, context.model)) {
+    return { enabled: false, reason: "Select a table cell first." };
+  }
+
+  if (command === "insert-column-before" || command === "insert-column-after") {
+    if (context.model !== "cals") return { enabled: true, reason: "" };
+    const grid = resolveCalsGrid(table);
+    if (!grid.valid) return { enabled: false, reason: "Fix invalid table spans before inserting columns." };
+    const selectedCell = getCalsGridCellForEntry(grid, cell);
+    if (!selectedCell) return { enabled: false, reason: "Could not resolve selected cell." };
+    const insertAfterCol = command === "insert-column-before" ? selectedCell.startCol - 1 : selectedCell.endCol;
+    const crossingSpan = grid.rows.some((rowGrid) => rowGrid.slots.some((slot) => (
+      slot && slot.startCol <= insertAfterCol && slot.endCol > insertAfterCol
+    )));
+    return crossingSpan
+      ? { enabled: false, reason: "A column span crosses this insertion point." }
+      : { enabled: true, reason: "" };
+  }
+
+  if (command === "delete-column") {
+    if (context.model === "cals" && calsTableHasSpans(table)) {
+      return { enabled: false, reason: "Clear table spans before deleting a CALS column." };
+    }
+    const rows = getTableRows(table, context.model);
+    const maxColumns = Math.max(0, ...rows.map((currentRow) => getRowCells(currentRow, context.model).length));
+    return maxColumns > 1
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "A table must keep at least one column." };
+  }
+
+  if (command === "merge-right") {
+    if (context.model !== "cals") return { enabled: false, reason: "Merge right is available for CALS tables." };
+    const grid = resolveCalsGrid(table);
+    if (!grid.valid) return { enabled: false, reason: "Fix invalid table spans before merging." };
+    const selectedCell = getCalsGridCellForEntry(grid, cell);
+    if (!selectedCell) return { enabled: false, reason: "Could not resolve selected cell." };
+    const rightCell = grid.rows[selectedCell.rowIndex]?.cells.find((candidate) => candidate.startCol === selectedCell.endCol + 1);
+    if (!rightCell) return { enabled: false, reason: "No cell exists to the right." };
+    const selectedMoreRows = Number(selectedCell.entry.getAttribute("morerows") || 0);
+    const rightMoreRows = Number(rightCell.entry.getAttribute("morerows") || 0);
+    return selectedMoreRows === rightMoreRows
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "Both cells must have the same morerows value." };
+  }
+
+  if (command === "merge-left") {
+    if (context.model !== "cals") return { enabled: false, reason: "Merge left is available for CALS tables." };
+    const grid = resolveCalsGrid(table);
+    if (!grid.valid) return { enabled: false, reason: "Fix invalid table spans before merging." };
+    const selectedCell = getCalsGridCellForEntry(grid, cell);
+    if (!selectedCell) return { enabled: false, reason: "Could not resolve selected cell." };
+    const leftCell = grid.rows[selectedCell.rowIndex]?.cells.find((candidate) => candidate.endCol + 1 === selectedCell.startCol);
+    if (!leftCell) return { enabled: false, reason: "No cell exists to the left." };
+    const selectedMoreRows = Number(selectedCell.entry.getAttribute("morerows") || 0);
+    const leftMoreRows = Number(leftCell.entry.getAttribute("morerows") || 0);
+    return selectedMoreRows === leftMoreRows
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "Both cells must have the same morerows value." };
+  }
+
+  if (command === "split-cells") {
+    if (context.model !== "cals") return { enabled: false, reason: "Split cells is available for CALS tables." };
+    const grid = resolveCalsGrid(table);
+    if (!grid.valid) return { enabled: false, reason: "Fix invalid table spans before splitting cells." };
+    const selectedCell = getCalsGridCellForEntry(grid, cell);
+    if (!selectedCell) return { enabled: false, reason: "Could not resolve selected cell." };
+    return selectedCell.rowSpan > 1 || selectedCell.endCol > selectedCell.startCol
+      ? { enabled: true, reason: "" }
+      : { enabled: false, reason: "Select a spanned cell first." };
+  }
+
+  return { enabled: false, reason: "Unsupported table command." };
+}
+
+function getTableContextMenuOptions(doc: Document | null, selectedPath: number[]) {
+  const context = findNearestTableContext(doc, selectedPath);
+  if (!context) return [];
+
+  const commands: Array<{ id: TableCommand; label: string; icon: string }> = [
+    { id: "insert-row-after", label: "Insert Row After", icon: "table-row-after" },
+    { id: "insert-row-before", label: "Insert Row Before", icon: "table-row-before" },
+    { id: "insert-column-after", label: "Insert Column After", icon: "table-column-after" },
+    { id: "insert-column-before", label: "Insert Column Before", icon: "table-column-before" },
+    { id: "delete-column", label: "Delete Column", icon: "table-delete-column" },
+    { id: "delete-row", label: "Delete Row", icon: "table-delete-row" },
+    { id: "merge-right", label: "Merge Right", icon: "table-merge-right" },
+    { id: "merge-left", label: "Merge Left", icon: "table-merge-left" },
+    { id: "split-cells", label: "Split Cells", icon: "table-split-cells" },
+  ];
+
+  return commands.map((command) => {
+    const validation = getTableCommandValidation(doc, selectedPath, command.id);
+    return {
+      ...command,
+      disabled: !validation.enabled,
+      title: validation.reason,
+    };
+  });
+}
+
+function getContextualAttributeValues(doc: Document | null, selectedPath: number[], attributeName: string): string[] | null {
+  if (!["colname", "namest", "nameend"].includes(attributeName)) return null;
+
+  const context = findNearestTableContext(doc, selectedPath);
+  if (context?.model !== "cals") return null;
+
+  const table = getNodeByPath(doc, context.tablePath);
+  if (!table) return null;
+
+  return getCalsColumnNames(table).filter(Boolean);
+}
+
 function getImagePlacementForParent(parent: Element | null): string {
   return parent && isInlineContainerElement(parent.tagName) ? "inline" : "break";
 }
 
-function getInsertContext(doc, selectedPath) {
-  const selectedNode = doc ? getNodeByPath(doc, selectedPath) : null;
-  const childOptions = getAllowedChildOptions(selectedNode);
-  const siblingOptions = getAllowedSiblingOptions(doc, selectedPath);
+function getInsertContext(doc, selectedPath, authoringSelection = null) {
+  const {
+    selectedNode,
+    childOptions,
+    siblingOptions,
+    surroundOptions,
+    ribbonOptions,
+  } = getAuthoringInsertActions(doc, selectedPath, authoringSelection);
 
   if (!selectedNode) {
     return {
@@ -2635,6 +3962,8 @@ function getInsertContext(doc, selectedPath) {
       options: [],
       childOptions: [],
       siblingOptions: [],
+      surroundOptions: [],
+      ribbonOptions: [],
       placement: "none",
       selectedNode: null,
     };
@@ -2646,6 +3975,8 @@ function getInsertContext(doc, selectedPath) {
       options: childOptions,
       childOptions,
       siblingOptions,
+      surroundOptions,
+      ribbonOptions,
       placement: "child",
       selectedNode,
     };
@@ -2657,6 +3988,8 @@ function getInsertContext(doc, selectedPath) {
       options: siblingOptions,
       childOptions,
       siblingOptions,
+      surroundOptions,
+      ribbonOptions,
       placement: "after",
       selectedNode,
     };
@@ -2667,6 +4000,8 @@ function getInsertContext(doc, selectedPath) {
     options: [],
     childOptions,
     siblingOptions,
+    surroundOptions,
+    ribbonOptions,
     placement: "none",
     selectedNode,
   };
@@ -2686,6 +4021,25 @@ function getElementPathLabel(doc: Document | null, path: number[] = []): string 
   }
 
   return `/${names.join("/")}`;
+}
+
+function getElementBreadcrumbItems(doc: Document | null, path: number[] = []) {
+  if (!doc?.documentElement) return [];
+
+  const items = [{ tagName: doc.documentElement.tagName, path: [] as number[] }];
+  let current: Element | null = doc.documentElement;
+  const currentPath: number[] = [];
+
+  for (const index of path) {
+    const child = current ? elementChildren(current)[index] : null;
+    if (!child) break;
+
+    currentPath.push(index);
+    items.push({ tagName: child.tagName, path: [...currentPath] });
+    current = child;
+  }
+
+  return items;
 }
 
 function countWords(text: string): number {
@@ -3141,9 +4495,29 @@ function formatXml(xml) {
   const { doc, error } = parseXml(xml);
   if (error) return xml;
 
-  function serializeInline(node: Node): string {
+  function normalizeInlineText(text = "", position: "middle" | "start" | "end" | "only" = "middle") {
+    let normalized = text.replace(/[\t\r\n ]+/g, " ");
+
+    if (position === "start" || position === "only") {
+      normalized = normalized.trimStart();
+    }
+
+    if (position === "end" || position === "only") {
+      normalized = normalized.trimEnd();
+    }
+
+    return normalized.trim() ? escapeXml(normalized) : "";
+  }
+
+  function serializeInline(node: Node, index = 0, siblings: ChildNode[] = []): string {
     if (node.nodeType === Node.TEXT_NODE) {
-      return escapeXml(node.textContent || "");
+      const position =
+        siblings.length <= 1 ? "only"
+        : index === 0 ? "start"
+        : index === siblings.length - 1 ? "end"
+        : "middle";
+
+      return normalizeInlineText(node.textContent || "", position);
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
@@ -3160,7 +4534,7 @@ function formatXml(xml) {
       return `<${element.tagName}${attrs}/>`;
     }
 
-    return `<${element.tagName}${attrs}>${children.map(serializeInline).join("")}</${element.tagName}>`;
+    return `<${element.tagName}${attrs}>${children.map((child, index) => serializeInline(child, index, children)).join("")}</${element.tagName}>`;
   }
 
   function serialize(node: Node, depth = 0): string {
@@ -3198,7 +4572,7 @@ function formatXml(xml) {
       elementChildNodes.every((child) => isInlineInsertionElement(child.tagName));
 
     if (isMixedInlineContent) {
-      return `${pad}<${element.tagName}${attrs}>${children.map(serializeInline).join("")}</${element.tagName}>`;
+      return `${pad}<${element.tagName}${attrs}>${children.map((child, index) => serializeInline(child, index, children)).join("")}</${element.tagName}>`;
     }
 
     const inner = children.map((child) => serialize(child, depth + 1)).filter(Boolean).join("\n");
@@ -3248,9 +4622,13 @@ function escapeXml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function createElementFor(doc, tagName, options: { imagePlacement?: string } = {}) {
+function createElementFor(doc, tagName, options: { imagePlacement?: string; referenceRow?: Element | null } = {}) {
+  const tableRow = createTableRowElement(doc, tagName, options.referenceRow || null);
+  if (tableRow) return tableRow;
+
   const element = doc.createElement(tagName);
-  const template = getElementDefinition(tagName)?.template;
+  const definition = getElementDefinition(tagName);
+  const template = definition?.template;
   const classChain = getSpecializationClassChain(tagName);
 
   if (classChain) {
@@ -3289,6 +4667,26 @@ function createElementFor(doc, tagName, options: { imagePlacement?: string } = {
     element.textContent = "";
   } else if (template === "title") {
     element.textContent = "";
+  } else if (tagName === "table") {
+    const tgroup = doc.createElement("tgroup");
+    const tbody = doc.createElement("tbody");
+    tgroup.setAttribute("cols", "2");
+    tgroup.append(createCalsColspec(doc, 0), createCalsColspec(doc, 1));
+    tbody.append(createCalsRowWithColumnCount(doc, 2));
+    tgroup.append(tbody);
+    element.append(tgroup);
+  } else if (tagName === "thead" || tagName === "tbody") {
+    element.append(createCalsRowWithColumnCount(doc, 2));
+  } else if (tagName === "simpletable") {
+    const row = doc.createElement("strow");
+    row.append(doc.createElement("stentry"), doc.createElement("stentry"));
+    element.append(row);
+  } else if (definition?.requiredChildren?.length) {
+    getRequiredTemplateChildren(definition).forEach((childName) => {
+      element.append(createElementFor(doc, childName, {
+        imagePlacement: childName === "image" ? getImagePlacementForParent(element) : undefined,
+      }));
+    });
   } else {
     element.textContent = "";
   }
@@ -3312,7 +4710,27 @@ function getFirstEditablePath(element: Element | null, basePath: number[]): numb
   if (!element) return basePath;
 
   const tagName = element.tagName;
-  const editableTags = new Set(["title", "shortdesc", "p", "li", "note", "codeblock", "xref", "ph", "b", "i", "u", "cmd"]);
+  const editableTags = new Set([
+    "title",
+    "shortdesc",
+    "p",
+    "li",
+    "note",
+    "codeblock",
+    "xref",
+    "ph",
+    "b",
+    "i",
+    "u",
+    "cmd",
+    "entry",
+    "stentry",
+    "choption",
+    "chdesc",
+    "proptype",
+    "propvalue",
+    "propdesc",
+  ]);
 
   if (editableTags.has(tagName) && elementChildren(element).length === 0) {
     return basePath;
@@ -3399,6 +4817,88 @@ function getRangeTextOffsetWithin(container: HTMLElement, range: Range, boundary
   }
 }
 
+function setCaretByTextOffset(target: HTMLElement, offset: number) {
+  const safeOffset = Math.max(0, offset);
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+  let remaining = safeOffset;
+  let textNode = walker.nextNode();
+
+  while (textNode) {
+    const textLength = textNode.textContent?.length || 0;
+    if (remaining <= textLength) {
+      const range = document.createRange();
+      range.setStart(textNode, remaining);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+
+    remaining -= textLength;
+    textNode = walker.nextNode();
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(target);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function createRangeForTextOffsets(container: HTMLElement, startOffset: number, endOffset: number) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let textNode = walker.nextNode();
+  let runningOffset = 0;
+  let startNode: Node | null = null;
+  let endNode: Node | null = null;
+  let startNodeOffset = 0;
+  let endNodeOffset = 0;
+
+  while (textNode) {
+    const textLength = textNode.textContent?.length || 0;
+    const nodeStart = runningOffset;
+    const nodeEnd = runningOffset + textLength;
+
+    if (!startNode && startOffset >= nodeStart && startOffset <= nodeEnd) {
+      startNode = textNode;
+      startNodeOffset = startOffset - nodeStart;
+    }
+
+    if (!endNode && endOffset >= nodeStart && endOffset <= nodeEnd) {
+      endNode = textNode;
+      endNodeOffset = endOffset - nodeStart;
+      break;
+    }
+
+    runningOffset = nodeEnd;
+    textNode = walker.nextNode();
+  }
+
+  if (!startNode || !endNode) return null;
+
+  const range = document.createRange();
+  range.setStart(startNode, startNodeOffset);
+  range.setEnd(endNode, endNodeOffset);
+  return range;
+}
+
+function spellingMarksAreEqual(
+  current: Array<{ id: string; left: number; top: number; width: number }>,
+  nextMarks: Array<{ id: string; left: number; top: number; width: number }>,
+) {
+  return current.length === nextMarks.length &&
+    current.every((mark, index) => {
+      const next = nextMarks[index];
+      return next &&
+        mark.id === next.id &&
+        Math.abs(mark.left - next.left) < 0.5 &&
+        Math.abs(mark.top - next.top) < 0.5 &&
+        Math.abs(mark.width - next.width) < 0.5;
+    });
+}
+
 function selectWordAtPoint(target: HTMLElement, clientX: number, clientY: number) {
   const rangeFromPoint =
     (document as any).caretRangeFromPoint?.(clientX, clientY) ||
@@ -3454,6 +4954,36 @@ function selectWordAtPoint(target: HTMLElement, clientX: number, clientY: number
   selection?.addRange(range);
 
   return getAuthoringSelection();
+}
+
+function getTextOffsetAtPoint(clientX: number, clientY: number) {
+  const rangeFromPoint =
+    (document as any).caretRangeFromPoint?.(clientX, clientY) ||
+    (() => {
+      const position = (document as any).caretPositionFromPoint?.(clientX, clientY);
+      if (!position) return null;
+      const range = document.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+      return range;
+    })();
+
+  if (!rangeFromPoint) return null;
+
+  const rawElement =
+    rangeFromPoint.startContainer.nodeType === Node.ELEMENT_NODE
+      ? rangeFromPoint.startContainer as Element
+      : rangeFromPoint.startContainer.parentElement;
+  const textRun = rawElement?.closest?.("[data-node-path]") as HTMLElement | null;
+
+  if (!textRun?.dataset.nodePath) return null;
+
+  return {
+    path: parsePathValue(textRun.dataset.nodePath),
+    pathKey: textRun.dataset.nodePath,
+    childNodeIndex: Number(textRun.dataset.textNodeIndex || 0),
+    offset: getRangeTextOffsetWithin(textRun, rangeFromPoint),
+  };
 }
 
 function toCssLength(value: string | null): string | undefined {
@@ -3566,14 +5096,20 @@ function pathsEqual(first, second) {
   return first.every((part, index) => part === second[index]);
 }
 
+function pathStartsWith(path, prefix) {
+  if (!Array.isArray(path) || !Array.isArray(prefix) || prefix.length > path.length) return false;
+  return prefix.every((part, index) => part === path[index]);
+}
+
 function renderTextWithVisualHighlights(
   text,
   pinnedSelection,
   path,
   childNodeIndex = 0,
   searchQuery = "",
+  spellingIssues: SpellingIssue[] = [],
 ) {
-  const ranges: Array<{ start: number; end: number; className: string }> = [];
+  const ranges: Array<{ start: number; end: number; className: string; spellingIssue?: SpellingIssue }> = [];
   const normalizedQuery = normalizeSearchText(searchQuery);
 
   if (normalizedQuery) {
@@ -3625,7 +5161,10 @@ function renderTextWithVisualHighlights(
     )].join(" ");
 
     return className ? (
-      <span className={className} key={`${start}-${end}-${className}`}>
+      <span
+        className={className}
+        key={`${start}-${end}-${className}`}
+      >
         {segment}
       </span>
     ) : segment;
@@ -3711,6 +5250,47 @@ function wrapTextRangeWithInlineElement(doc, tagName, textRange) {
   };
 }
 
+function unwrapElementAtPath(doc: Document, path: number[]) {
+  const node = getNodeByPath(doc, path);
+  const parent = node?.parentNode;
+  if (!node || node.nodeType !== Node.ELEMENT_NODE || !parent) return false;
+  const focusNode = node.firstChild;
+
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+
+  return {
+    focusChildNodeIndex: focusNode ? Array.from(parent.childNodes).indexOf(focusNode) : 0,
+  };
+}
+
+function isCaretAtEndOfElement(node: Element, nodePath: number[], caret): boolean {
+  if (!node || caret?.kind !== "caret") return false;
+
+  if (!pathsEqual(caret.path, nodePath)) {
+    return false;
+  }
+
+  return caret.offset >= stripEditableCaretSeed(node.textContent || "").length;
+}
+
+function hasMeaningfulContentAfterNode(node: Element): boolean {
+  let sibling = node.nextSibling;
+
+  while (sibling) {
+    if (sibling.nodeType === Node.ELEMENT_NODE) return true;
+    if (sibling.nodeType === Node.TEXT_NODE && stripEditableCaretSeed(sibling.textContent || "").trim()) {
+      return true;
+    }
+
+    sibling = sibling.nextSibling;
+  }
+
+  return false;
+}
+
 function getTextRangeValue(doc: Document | null, textRange): string {
   if (!doc || textRange?.kind !== "range") return "";
 
@@ -3738,6 +5318,31 @@ function replaceTextRangeValue(doc: Document, textRange, replacement: string): b
   return true;
 }
 
+function getSchemaChildOrder(parent: Element): string[] {
+  const definition = getElementDefinition(parent.tagName);
+  return definition?.childOrder?.length ? definition.childOrder : definition?.children || [];
+}
+
+function insertSchemaOrderedChild(parent: Element, child: Element, minimumIndex = 0) {
+  const childOrder = getSchemaChildOrder(parent);
+  const candidateOrder = childOrder.indexOf(child.tagName);
+  const children = elementChildren(parent);
+  const safeMinimumIndex = Math.max(0, Math.min(minimumIndex, children.length));
+
+  if (candidateOrder === -1) {
+    parent.insertBefore(child, minimumIndex > 0 ? children[safeMinimumIndex] || null : null);
+    return elementChildren(parent).indexOf(child);
+  }
+
+  const reference = children.slice(safeMinimumIndex).find((existingChild) => {
+    const existingOrder = childOrder.indexOf(existingChild.tagName);
+    return existingOrder !== -1 && existingOrder > candidateOrder;
+  }) || null;
+
+  parent.insertBefore(child, reference);
+  return elementChildren(parent).indexOf(child);
+}
+
 function appendSchemaChild(parent, child) {
   if (parent.tagName === "topic" && child.tagName === "shortdesc") {
     const body = elementChildren(parent).find((element) => element.tagName === "body");
@@ -3747,8 +5352,20 @@ function appendSchemaChild(parent, child) {
     }
   }
 
-  parent.append(child);
-  return elementChildren(parent).length - 1;
+  if (parent.tagName === "tgroup" && child.tagName === "colspec") {
+    const insertAfterCol = getCalsColumnNames(parent).length - 1;
+    const result = insertCalsColumnAfterIndex(parent.ownerDocument, parent, insertAfterCol);
+    return result?.newColspec ? elementChildren(parent).indexOf(result.newColspec) : null;
+  }
+
+  if (parent.tagName === "tgroup" && child.tagName === "thead") {
+    const existingThead = elementChildren(parent).find((element) => element.tagName === "thead");
+    if (existingThead) return elementChildren(parent).indexOf(existingThead);
+    insertCalsTheadIntoTgroup(parent, child);
+    return elementChildren(parent).indexOf(child);
+  }
+
+  return insertSchemaOrderedChild(parent, child);
 }
 
 function insertSchemaSiblingAfter(doc, selectedPath, tagName) {
@@ -3759,12 +5376,35 @@ function insertSchemaSiblingAfter(doc, selectedPath, tagName) {
   const reference = getNodeByPath(doc, selectedPath);
 
   if (!parent || !reference) return null;
+  const tableColumnPath = insertTableColumnAfterCell(doc, selectedPath, tagName);
+  if (tableColumnPath !== undefined) return tableColumnPath;
+
   if (!getAllowedChildOptions(parent).includes(tagName)) return null;
 
+  if (parent.tagName === "tgroup" && tagName === "colspec") {
+    const colspecs = getCalsColspecs(parent);
+    const referenceIndex = reference.tagName === "colspec" ? colspecs.indexOf(reference) : colspecs.length - 1;
+    const insertAfterCol = referenceIndex >= 0 ? referenceIndex : getCalsColumnNames(parent).length - 1;
+    const result = insertCalsColumnAfterIndex(doc, parent, insertAfterCol);
+    return result?.newColspec ? [...parentPath, elementChildren(parent).indexOf(result.newColspec)] : null;
+  }
+
+  if (parent.tagName === "tgroup" && tagName === "thead") {
+    const existingThead = elementChildren(parent).find((element) => element.tagName === "thead");
+    if (existingThead) return [...parentPath, elementChildren(parent).indexOf(existingThead)];
+    const newElement = createElementFor(doc, tagName);
+    insertCalsTheadIntoTgroup(parent, newElement);
+    return [...parentPath, elementChildren(parent).indexOf(newElement)];
+  }
+
+  const referenceRow = getTableModelForRow(tagName) && getTableModelForRow(reference.tagName) === getTableModelForRow(tagName)
+    ? reference
+    : null;
   const newElement = createElementFor(doc, tagName, {
     imagePlacement: tagName === "image" ? getImagePlacementForParent(parent) : undefined,
+    referenceRow,
   });
-  parent.insertBefore(newElement, reference.nextSibling);
+  insertSchemaOrderedChild(parent, newElement, elementChildren(parent).indexOf(reference) + 1);
 
   return [...parentPath, elementChildren(parent).indexOf(newElement)];
 }
@@ -3862,8 +5502,135 @@ function splitListItemAtCaret(doc, listItemPath, currentText = "", textNodeIndex
   return splitEditableElementAtCaret(doc, listItemPath, "li", currentText, textNodeIndex, caret);
 }
 
+function getElementByRelativePath(root: Element, relativePath: number[]): Element | null {
+  let current: Element | null = root;
+
+  for (const index of relativePath) {
+    current = current ? elementChildren(current)[index] || null : null;
+    if (!current) return null;
+  }
+
+  return current;
+}
+
+function findClosestListItemSpecializationPath(doc: Document, path: number[]) {
+  for (let depth = path.length; depth >= 0; depth -= 1) {
+    const ancestorPath = path.slice(0, depth);
+    const node = getNodeByPath(doc, ancestorPath);
+    if (nodeSpecializesFrom(node, "li")) {
+      return ancestorPath;
+    }
+  }
+
+  return null;
+}
+
+function splitListItemSpecializationAtCaret(doc, editPath, currentText = "", textNodeIndex = null, caret = null) {
+  const listItemPath = findClosestListItemSpecializationPath(doc, editPath);
+  if (!listItemPath) return null;
+
+  const listItem = getNodeByPath(doc, listItemPath);
+  if (!listItem) return null;
+
+  if (listItem.tagName === "li" && editPath.join(".") === listItemPath.join(".")) {
+    return splitListItemAtCaret(doc, listItemPath, currentText, textNodeIndex, caret);
+  }
+
+  const parentPath = listItemPath.slice(0, -1);
+  const parent = getNodeByPath(doc, parentPath);
+  if (!parent || !getAllowedChildOptions(parent).includes(listItem.tagName)) return null;
+
+  const nextListItem = createElementFor(doc, listItem.tagName);
+  const editRelativePath = editPath.slice(listItemPath.length);
+  const originalEditable = getNodeByPath(doc, editPath);
+  const nextEditable = editRelativePath.length
+    ? getElementByRelativePath(nextListItem, editRelativePath)
+    : nextListItem;
+  const offsetSource = Number.isFinite(caret?.offset) ? caret.offset : currentText.length;
+
+  if (originalEditable && nextEditable && elementChildren(originalEditable).length === 0) {
+    const text = currentText ?? originalEditable.textContent ?? "";
+    const safeOffset = Math.max(0, Math.min(offsetSource, text.length));
+    originalEditable.textContent = text.slice(0, safeOffset);
+    nextEditable.textContent = text.slice(safeOffset);
+  }
+
+  parent.insertBefore(nextListItem, listItem.nextSibling);
+
+  return [...parentPath, elementChildren(parent).indexOf(nextListItem)];
+}
+
 function splitParagraphAtCaret(doc, paragraphPath, currentText = "", textNodeIndex = null, caret = null) {
   return splitEditableElementAtCaret(doc, paragraphPath, "p", currentText, textNodeIndex, caret);
+}
+
+function isEmptyElement(node: Element | null | undefined) {
+  if (!node) return false;
+  return elementChildren(node).length === 0 && !(node.textContent || "").trim();
+}
+
+function isRemovableEmptyInlineElement(node: Element | null | undefined) {
+  if (!node || !isKnownInlineElement(node.tagName) || !isEmptyElement(node)) return false;
+  if (["image", "xref", "topicref", "boolean"].includes(node.tagName)) return false;
+  return node.attributes.length === 0;
+}
+
+function cleanupEmptyInlineElements(node: Element | null | undefined) {
+  if (!node) return;
+
+  for (const child of elementChildren(node)) {
+    cleanupEmptyInlineElements(child);
+    if (isRemovableEmptyInlineElement(child)) {
+      child.remove();
+    }
+  }
+}
+
+function isRequiredListContainer(node: Element | null | undefined) {
+  if (!node) return false;
+  const definition = getElementDefinition(node.tagName);
+  return Boolean(definition?.requiredChildren?.some((childName) => elementSpecializesFrom(childName, "li")));
+}
+
+function cleanupEmptyRequiredListContainers(doc: Document, startPath: number[]) {
+  let nextPath = [...startPath];
+
+  while (nextPath.length >= 0) {
+    const node = getNodeByPath(doc, nextPath);
+    if (!node || !isRequiredListContainer(node) || !isEmptyElement(node)) break;
+
+    const parentPath = nextPath.slice(0, -1);
+    node.remove();
+    nextPath = parentPath;
+
+    if (nextPath.length === 0) break;
+  }
+
+  return nextPath;
+}
+
+function removeElementWithSchemaCleanup(doc: Document, path: number[]) {
+  const selectedNode = getNodeByPath(doc, path);
+  if (!selectedNode || !selectedNode.parentElement) return null;
+
+  const tableColumnPath = deleteTableColumnAtCell(doc, path);
+  if (tableColumnPath !== undefined) return tableColumnPath;
+
+  const parentPath = path.slice(0, -1);
+  const parent = selectedNode.parentElement;
+  const parentDefinition = getElementDefinition(parent.tagName);
+  const removeOwningListItem = Boolean(
+    parentDefinition?.requiredChildren?.includes(selectedNode.tagName) &&
+    nodeSpecializesFrom(parent, "li")
+  );
+  const targetPath = removeOwningListItem ? parentPath : path;
+  const targetNode = removeOwningListItem ? parent : selectedNode;
+  let nextPath = targetPath.slice(0, -1);
+
+  targetNode.remove();
+  nextPath = cleanupEmptyRequiredListContainers(doc, nextPath);
+
+  return nextPath;
 }
 
 const maxHistoryEntries = 80;
@@ -3887,6 +5654,7 @@ function App() {
   ]);
   const [fileHistories, setFileHistories] = useState({});
   const [selectedPathsByFile, setSelectedPathsByFile] = useState({});
+  const [caretContextVersion, setCaretContextVersion] = useState(0);
   const [documentHighlightPathKey, setDocumentHighlightPathKey] = useState<string | null>(null);
   const [newItemName, setNewItemName] = useState(getDefaultFileStem("topic"));
   const [newItemType, setNewItemType] = useState("topic");
@@ -3998,9 +5766,28 @@ function App() {
     },
     description: "",
   });
+  const [visualTemplateModel, setVisualTemplateModel] = useState<any>(defaultVisualTemplateModel);
+  const [visualTemplatePickerMode, setVisualTemplatePickerMode] = useState<"create" | "open" | null>(null);
+  const [visualTemplateUploadOpen, setVisualTemplateUploadOpen] = useState(false);
+  const [visualTemplateImportOpen, setVisualTemplateImportOpen] = useState(false);
+  const [visualTemplateSourceId, setVisualTemplateSourceId] = useState<string | null>(null);
+  const [visualTemplateDropRegionId, setVisualTemplateDropRegionId] = useState<string | null>(null);
+  const [visualTemplateSelectedRegionId, setVisualTemplateSelectedRegionId] = useState<string | null>("hero");
   const [tabDropTarget, setTabDropTarget] = useState(null);
   const [projectDropTarget, setProjectDropTarget] = useState(null);
   const [pinnedAuthoringSelection, setPinnedAuthoringSelection] = useState(null);
+  const [inlineExitCaret, setInlineExitCaret] = useState<{
+    parentPath: number[];
+    afterElementIndex: number;
+    tagName: string;
+  } | null>(null);
+  const [spellingIssues, setSpellingIssues] = useState<SpellingIssue[]>([]);
+  const [spellingMarks, setSpellingMarks] = useState<Array<{
+    id: string;
+    left: number;
+    top: number;
+    width: number;
+  }>>([]);
   const fileInputRef = useRef(null);
   const caretRef = useRef(null);
   const contextSelectionRangeRef = useRef<Range | null>(null);
@@ -4012,6 +5799,15 @@ function App() {
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
   const realtimeAudioRef = useRef<HTMLAudioElement | null>(null);
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visualTextCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spellingCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spellingRequestIdRef = useRef(0);
+  const ignoredSpellingIssueIdsRef = useRef<Set<string>>(new Set());
+  const pendingCaretFocusRef = useRef<{
+    path: number[];
+    childNodeIndex: number;
+    offset: number;
+  } | null>(null);
   const lastSavedDraftRef = useRef("");
   const authoringProfileSaveTimerRef = useRef<number | null>(null);
   const authoringProfilesLoadedRef = useRef(false);
@@ -4023,9 +5819,11 @@ function App() {
     path: number[];
     textNodeIndex: number | null;
     value: string;
+    offset?: number;
   } | null>(null);
   const activeFile = findProjectNode(projectTree, activeFileId)?.node;
   const activeFileKind = getProjectFileKind(activeFile);
+  const activeIsVisualTemplate = activeFileId === visualTemplatesTabId || activeFileKind === "visual-template";
   const activeIsTextEditable = isTextEditableFile(activeFile);
   const activeIsXml = activeFileKind === "xml";
   const activeFilePath = getProjectFilePath(projectTree, activeFileId);
@@ -4036,6 +5834,10 @@ function App() {
   };
   const selectedPath = selectedPathsByFile[activeFileId] || [];
   const xml = history.present;
+  const activeSpellingIssues = spellingIssues.filter((issue) => issue.fileId === activeFileId);
+  const activeSpellingIssuesKey = activeSpellingIssues
+    .map((issue) => `${issue.id}:${issue.startOffset}:${issue.endOffset}`)
+    .join("|");
   const activeValidation = validationByFile[activeFileId] || { status: "idle", message: "Not validated yet." };
   const toolbarValidation = activeValidation.status === "idle" ? lastValidation : activeValidation;
   const activeValidationRun = validationRuns.find((run) => run.id === activeValidationRunId) || validationRuns[0] || null;
@@ -4070,15 +5872,33 @@ function App() {
     ? selectedProjectNode.id
     : selectedProject?.parent?.id || "root";
   const selectedContainer = findProjectNode(projectTree, selectedContainerId)?.node;
+  const activeAuthoringSelection = pinnedAuthoringSelection || caretRef.current;
   const insertContext = parsed.doc
-    ? getInsertContext(parsed.doc, selectedPath)
-    : getInsertContext(null, selectedPath);
+    ? getInsertContext(parsed.doc, selectedPath, activeAuthoringSelection)
+    : getInsertContext(null, selectedPath, activeAuthoringSelection);
+  const activeTableContext = useMemo(() => (
+    parsed.doc ? findNearestTableContext(parsed.doc, selectedPath) : null
+  ), [parsed.doc, schemaProfileVersion, selectedPath]);
   const ribbonAllowedTags = useMemo(() => (
-    new Set<string>([
-      ...(insertContext.childOptions || []),
-      ...(insertContext.siblingOptions || []),
-    ])
-  ), [insertContext.childOptions, insertContext.siblingOptions, schemaProfileVersion]);
+    new Set<string>(insertContext.ribbonOptions || [])
+  ), [insertContext.ribbonOptions, schemaProfileVersion]);
+  const activeRibbonTags = useMemo(() => {
+    const tags = new Set<string>();
+    if (!parsed.doc) return tags;
+
+    const selectionPath = caretRef.current?.path || selectedPath;
+    const path = Array.isArray(selectionPath) && selectionPath.length ? selectionPath : selectedPath;
+
+    for (let depth = path.length; depth >= 0; depth -= 1) {
+      const ancestorPath = path.slice(0, depth);
+      const node = getNodeByPath(parsed.doc, ancestorPath);
+      if (node?.nodeType === Node.ELEMENT_NODE && isKnownInlineElement(node.tagName)) {
+        tags.add(node.tagName);
+      }
+    }
+
+    return tags;
+  }, [activeFileId, caretContextVersion, parsed.doc, schemaProfileVersion, selectedPath]);
   const errorCount = activeIsXml ? issues.filter((issue) => issue.level === "error").length + hrefValidationIssues.length : 0;
   const canUndo = history.past.length > 0;
   const canRedo = history.future.length > 0;
@@ -4095,9 +5915,10 @@ function App() {
   );
   const draftBackedFiles = collectProjectFiles(projectTree).filter(({ node }) => (
     node.type === "file" &&
-    (node.draftDirty || (node.githubPath && !node.githubSha)) &&
+    Boolean(node.githubPath) &&
+    (node.deletedAt || node.draftDirty || (node.githubPath && !node.githubSha)) &&
+    !(node.deletedAt && !node.githubSha) &&
     (
-      !node.githubPath ||
       !pendingLocalCommitHashByPath.has(normalizeProjectPath(node.githubPath)) ||
       pendingLocalCommitHashByPath.get(normalizeProjectPath(node.githubPath)) !== (node.draftContentHash || "")
     )
@@ -4134,7 +5955,7 @@ function App() {
 
     let cancelled = false;
 
-    fetch(`${backendBaseUrl}/api/schema/dita?type=${encodeURIComponent(schemaRootName)}`)
+    fetch(`${backendBaseUrl}/api/schema/dita?type=${encodeURIComponent(schemaRootName)}&refresh=1`)
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) {
@@ -4243,11 +6064,13 @@ function App() {
 
   function pushNotification({
     body,
+    persistent = true,
     severity = "info",
     source,
     title,
   }: {
     body: string;
+    persistent?: boolean;
     severity?: NotificationSeverity;
     source?: string;
     title: string;
@@ -4259,6 +6082,7 @@ function App() {
       severity,
       title,
       body,
+      persistent,
       source,
       createdAt,
     };
@@ -4269,6 +6093,10 @@ function App() {
     ].slice(0, 10));
 
     saveNotification(optimisticNotification);
+
+    if (!persistent) {
+      window.setTimeout(() => dismissNotificationToast(id), 5000);
+    }
   }
 
   function dismissNotificationToast(notificationId: string) {
@@ -4303,9 +6131,14 @@ function App() {
       }
 
       if (body.notification) {
+        if (notification.persistent === false) {
+          window.setTimeout(() => dismissNotificationToast(body.notification.id), 5000);
+        }
+
         setNotifications((current) => [
           {
             ...body.notification,
+            persistent: notification.persistent,
             toastDismissed: notification.toastDismissed,
           },
           ...current.filter((item) => item.id !== notification.id && item.id !== body.notification.id),
@@ -4875,6 +6708,164 @@ function App() {
   };
   const renderedLeftPanel = activeLeftPanel || lastLeftPanel;
   const renderedSidePanel = activeSidePanel || lastSidePanel;
+  const visualTemplateSidePanels: SidePanelId[] = ["templateSources", "templateBindings", "templateStyle", "notifications"];
+  const defaultSidePanels: SidePanelId[] = ["inspector", "schema", "search", "chat", "aiReview", "github", "notifications", "help"];
+  const visibleSidePanels = activeIsVisualTemplate ? visualTemplateSidePanels : defaultSidePanels;
+
+  useEffect(() => {
+    if (activeSidePanel && !visibleSidePanels.includes(activeSidePanel)) {
+      setActiveSidePanel(null);
+    }
+  }, [activeIsVisualTemplate, activeSidePanel]);
+
+  function filterIgnoredSpellingIssues(issues: SpellingIssue[]) {
+    return issues.filter((issue) => !ignoredSpellingIssueIdsRef.current.has(issue.id));
+  }
+
+  async function checkSpellingOnBackend(segments: SpellingTextSegment[]): Promise<SpellingIssue[]> {
+    if (!segments.length) return [];
+
+    const response = await fetch(`${backendBaseUrl}/api/spelling/check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(await getBackendAuthHeaders()),
+      },
+      body: JSON.stringify({ segments }),
+    });
+    const body = await response.json();
+
+    if (!response.ok) {
+      throw new Error(body.error || "Spelling check failed.");
+    }
+
+    return Array.isArray(body.issues) ? body.issues : [];
+  }
+
+  useEffect(() => {
+    ignoredSpellingIssueIdsRef.current.clear();
+  }, [spellingEngineVersion]);
+
+  useEffect(() => {
+    ignoredSpellingIssueIdsRef.current.clear();
+  }, [activeFileId, xml]);
+
+  useEffect(() => {
+    setSpellingIssues([]);
+    ignoredSpellingIssueIdsRef.current.clear();
+    spellingRequestIdRef.current += 1;
+    if (spellingCheckTimerRef.current) {
+      clearTimeout(spellingCheckTimerRef.current);
+      spellingCheckTimerRef.current = null;
+    }
+  }, [activeFileId]);
+
+  useEffect(() => {
+    if (!activeFileId || !activeIsXml || !parsed.doc?.documentElement) {
+      setSpellingIssues((current) => current.filter((issue) => issue.fileId !== activeFileId));
+      return;
+    }
+
+    const requestId = spellingRequestIdRef.current + 1;
+    spellingRequestIdRef.current = requestId;
+
+    if (spellingCheckTimerRef.current) {
+      clearTimeout(spellingCheckTimerRef.current);
+    }
+
+    spellingCheckTimerRef.current = setTimeout(() => {
+      if (requestId !== spellingRequestIdRef.current) return;
+      const segments = collectSpellingTextSegmentsForDocument(parsed.doc!.documentElement, activeFileId);
+
+      checkSpellingOnBackend(segments)
+        .then((issues) => {
+          if (requestId !== spellingRequestIdRef.current) return;
+          const nextIssues = filterIgnoredSpellingIssues(issues);
+
+          setSpellingIssues((current) => [
+            ...current.filter((issue) => issue.fileId !== activeFileId),
+            ...nextIssues,
+          ]);
+        })
+        .catch(() => {
+          if (requestId !== spellingRequestIdRef.current) return;
+          const nextIssues = filterIgnoredSpellingIssues(
+            collectSpellingIssuesForDocument(parsed.doc!.documentElement, activeFileId),
+          );
+
+          setSpellingIssues((current) => [
+            ...current.filter((issue) => issue.fileId !== activeFileId),
+            ...nextIssues,
+          ]);
+        });
+    }, 850);
+  }, [activeFileId, activeIsXml, parsed.doc, xml]);
+
+  useEffect(() => {
+    return () => {
+      if (spellingCheckTimerRef.current) {
+        clearTimeout(spellingCheckTimerRef.current);
+      }
+    };
+  }, [selectedPath]);
+
+  useLayoutEffect(() => {
+    const workbench = document.querySelector(".editor-column.active-pane .visual-workbench") as HTMLElement | null;
+    const workbenchRect = workbench?.getBoundingClientRect();
+    const nextMarks: Array<{ id: string; left: number; top: number; width: number }> = [];
+
+    activeSpellingIssues.forEach((issue) => {
+      const textRun = Array.from(
+        document.querySelectorAll(".editor-column.active-pane [data-node-path][data-text-node-index]"),
+      ).find((candidate) => (
+        candidate instanceof HTMLElement &&
+        candidate.dataset.nodePath === issue.pathKey &&
+        Number(candidate.dataset.textNodeIndex || 0) === issue.childNodeIndex
+      )) as HTMLElement | undefined;
+
+      if (!textRun) {
+        return;
+      }
+
+      const textLength = textRun.textContent?.length || 0;
+      const startOffset = Math.max(0, Math.min(issue.startOffset, textLength));
+      const endOffset = Math.max(startOffset, Math.min(issue.endOffset, textLength));
+      if (startOffset === endOffset) {
+        return;
+      }
+
+      const range = createRangeForTextOffsets(textRun, startOffset, endOffset);
+      if (!range) return;
+
+      if (workbenchRect) {
+        Array.from(range.getClientRects()).forEach((rect, index) => {
+          if (rect.width <= 0 || rect.height <= 0) return;
+          nextMarks.push({
+            id: `${issue.id}-${index}`,
+            left: rect.left - workbenchRect.left + (workbench?.scrollLeft || 0),
+            top: rect.bottom - workbenchRect.top + (workbench?.scrollTop || 0) - 2,
+            width: rect.width,
+          });
+        });
+      }
+    });
+
+    setSpellingMarks((current) => {
+      return spellingMarksAreEqual(current, nextMarks) ? current : nextMarks;
+    });
+
+    const refreshMarks = () => {
+      setSpellingMarks((current) => current.map((mark) => ({ ...mark })));
+    };
+
+    workbench?.addEventListener("scroll", refreshMarks, { passive: true });
+    window.addEventListener("resize", refreshMarks);
+
+    return () => {
+      workbench?.removeEventListener("scroll", refreshMarks);
+      window.removeEventListener("resize", refreshMarks);
+    };
+  }, [activeFileId, activeSpellingIssuesKey, mode, xml]);
 
   useEffect(() => {
     const availableIds = new Set<string>(draftBackedFiles.map(({ node }) => node.id));
@@ -5163,6 +7154,7 @@ function App() {
   function switchToTab(fileId, paneId = null) {
     const file = findProjectNode(projectTree, fileId)?.node ||
       (fileId === specializationsTabId ? specializationsTabFile : null) ||
+      (fileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
       (fileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(fileId)) : null);
     if (!file || file.type !== "file") return;
     const pane = tabPanes.find((candidate) => candidate.id === paneId && candidate.tabs.includes(fileId)) ||
@@ -5276,6 +7268,7 @@ function App() {
   function getFileName(fileId) {
     const file = findProjectNode(projectTree, fileId)?.node;
     if (!file && fileId === specializationsTabId) return specializationsTabFile.name;
+    if (!file && fileId === visualTemplatesTabId) return visualTemplatesTabFile.name;
     if (!file && fileId?.startsWith(`${authoringProfileTabPrefix}-`)) return createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(fileId)).name;
     return file?.type === "file" ? file.name : "file";
   }
@@ -6207,12 +8200,16 @@ function App() {
     }
 
     setDraftSaveState({
-      status: "saving",
-      message: `Saving draft for ${activeFile.name}...`,
+      status: "pending",
+      message: `Draft changes pending for ${activeFile.name}.`,
     });
 
     draftSaveTimerRef.current = setTimeout(async () => {
       try {
+        setDraftSaveState({
+          status: "saving",
+          message: `Saving draft for ${activeFile.name}...`,
+        });
         const draftContent = activeFileKind === "xml" ? ensureDitaDoctype(xml) : xml;
         const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
           method: "PUT",
@@ -6290,7 +8287,12 @@ function App() {
         headers: await getBackendAuthHeaders(),
       });
       const draftBody = await draftResponse.json();
-      const savedDraft = draftResponse.ok ? draftBody.draft : null;
+      const savedDraft = draftResponse.ok &&
+        draftBody.draft?.dirty &&
+        !draftBody.draft?.deleted_at &&
+        draftBody.draft?.change_type !== "delete"
+        ? draftBody.draft
+        : null;
       const response = await fetch(`${backendBaseUrl}/api/github/file?path=${encodeURIComponent(file.githubPath)}`, {
         headers: await getBackendAuthHeaders(),
       });
@@ -6302,15 +8304,25 @@ function App() {
 
       const extension = getFileExtension(file.name);
       const isImage = /^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension);
-      const rawContent = isImage ? "" : savedDraft?.content_text || body.content || "";
-      const convertedContent = getProjectFileKind(file) === "xml"
+      const fileKind = getProjectFileKind(file);
+      let rawContent = isImage ? "" : savedDraft?.content_text || body.content || "";
+      const detectedDitaType = fileKind === "xml"
+        ? inferDitaTypeFromXml(rawContent) || inferBestProjectFileType(file.name, file.ditaType)
+        : file.ditaType;
+      let recoveredEmptyXml = false;
+      if (fileKind === "xml" && !String(rawContent).trim()) {
+        recoveredEmptyXml = true;
+        rawContent = createGenericFileContent(detectedDitaType || "topic", file.name);
+      }
+      const convertedContent = fileKind === "xml"
         ? convertEditorJsonToDitaXml(rawContent, file.name, file.ditaType)
         : null;
-      const normalizedContent = getProjectFileKind(file) === "xml"
+      const normalizedContent = fileKind === "xml"
         ? ensureDitaDoctype(convertedContent || rawContent)
         : rawContent;
       const loadedFile = {
         ...file,
+        ditaType: detectedDitaType || file.ditaType,
         content: normalizedContent,
         previewHref: isImage && response.ok && body.contentBase64
           ? `data:${body.mimeType || "application/octet-stream"};base64,${body.contentBase64}`
@@ -6324,6 +8336,9 @@ function App() {
         draftSavedAt: savedDraft?.saved_at || null,
         draftDirty: Boolean(savedDraft?.dirty),
       };
+      if (recoveredEmptyXml) {
+        setExplorerSystemMessage(`${file.name} is empty in GitHub. A valid starter XML document was opened locally; save and commit it to repair the file.`, "warning", { open: false });
+      }
       lastSavedDraftRef.current = loadedFile.githubPath
         ? `${loadedFile.githubPath}\n${loadedFile.githubSha || ""}\n${loadedFile.content || ""}`
         : lastSavedDraftRef.current;
@@ -6387,6 +8402,16 @@ function App() {
     setActiveFileId(file.id);
     setActivePaneId(targetPaneId);
     setSelectedProjectId(file.id);
+
+    if (fileKind === "visual-template") {
+      const model = parseVisualTemplateModel(file.content || "");
+      setVisualTemplateModel({
+        ...model,
+        filePath: file.githubPath || getProjectFilePath(projectTree, file.id) || model.filePath || "",
+      });
+      setExplorerSystemMessage(`Opened template binding ${file.name}`, "info", { open: false });
+      return;
+    }
 
     if (fileKind === "xml") {
       const { doc } = parseXml(file.content || "");
@@ -6499,6 +8524,7 @@ function App() {
         severity: "error",
         title: "Invalid Validation Target",
         body: `${targetFile.name} is not a DITA, DITA map, or XML file.`,
+        persistent: false,
         source: "Validation",
       });
       return;
@@ -6581,6 +8607,7 @@ function App() {
         body: isValid
           ? `${targetFile.name} is valid according to DITA-OT.`
           : validationState.message,
+        persistent: false,
         source: targetFile.name,
       });
     } catch (error) {
@@ -6626,6 +8653,7 @@ function App() {
         severity: "error",
         title: "Validation Service Error",
         body: message,
+        persistent: false,
         source: targetFile.name,
       });
     }
@@ -7068,7 +9096,30 @@ function App() {
     setExplorerSystemMessage(`Copied ${match.node.name}`);
   }
 
-  function deleteSelectedProjectItem() {
+  async function deleteProjectPathFromDatabase(projectPath: string, label: string) {
+    const response = await fetch(`${backendBaseUrl}/api/projects/path`, {
+      method: "DELETE",
+      headers: {
+        ...(await getBackendAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ path: projectPath }),
+    });
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(body.error || `Could not delete ${label} from Postgres.`);
+    }
+
+    appendTerminalMessage(
+      `Marked ${label} as deleted in Postgres (${body.softDeletedProjectFiles || 0} metadata rows, ${body.softDeletedDrafts || 0} drafts).`,
+      { source: "EXPLORER", level: "info" },
+    );
+
+    return body;
+  }
+
+  async function deleteSelectedProjectItem() {
     if (!selectedProjectNode || selectedProjectNode.id === "root") return;
 
     const selectedProjectPath = getProjectFilePath(projectTree, selectedProjectNode.id);
@@ -7083,6 +9134,62 @@ function App() {
         `Cannot delete ${selectedProjectNode.name}; it is referenced by ${getReferenceSourceSummary(blockingReferences)}.`,
         "warning",
       );
+      return;
+    }
+
+    let deleteResult: any = null;
+
+    try {
+      deleteResult = await deleteProjectPathFromDatabase(selectedProjectPath, selectedProjectNode.name);
+    } catch (error) {
+      setExplorerSystemMessage(error.message, "warning");
+      appendTerminalMessage(error.message, { source: "EXPLORER", level: "error", open: true });
+      return;
+    }
+
+    if (selectedProjectNode.type === "file" && selectedProjectNode.githubPath && selectedProjectNode.githubSha) {
+      const nextTree = updateProjectNode(projectTree, selectedProjectNode.id, (node) => ({
+        ...node,
+        deletedAt: deleteResult?.deletedAt || new Date().toISOString(),
+        draftDirty: true,
+      }));
+      const deletedFileIds = new Set([selectedProjectNode.id]);
+      const nextVisibleFile = findFirstVisibleFile(nextTree);
+      const nextPanes = tabPanes.map((pane) => {
+        const nextTabs = pane.tabs.filter((fileId) => !deletedFileIds.has(fileId));
+        return {
+          ...pane,
+          tabs: nextTabs,
+          activeFileId: deletedFileIds.has(pane.activeFileId) ? nextTabs[0] || null : pane.activeFileId,
+        };
+      }).filter((pane) => pane.tabs.length > 0);
+      const safePanes = nextPanes.length
+        ? nextPanes
+        : nextVisibleFile
+          ? [{ id: "pane-left", label: "Left", tabs: [nextVisibleFile.id], activeFileId: nextVisibleFile.id }]
+          : [];
+      const fallbackPane = safePanes.find((pane) => pane.id === activePaneId) || safePanes[0];
+      const fallbackActiveFileId = fallbackPane?.activeFileId || nextVisibleFile?.id;
+
+      setProjectTree(nextTree);
+      setTabPanes(safePanes);
+      setFileHistories((current) => {
+        const nextHistories = { ...current };
+        deletedFileIds.forEach((id) => delete nextHistories[id]);
+        return nextHistories;
+      });
+      setSelectedPathsByFile((current) => {
+        const nextPaths = { ...current };
+        deletedFileIds.forEach((id) => delete nextPaths[id]);
+        return nextPaths;
+      });
+      setSelectedProjectId(fallbackActiveFileId || nextVisibleFile?.id || "root");
+      setSelectedGitCommitFileIds((currentIds) => new Set(currentIds).add(selectedProjectNode.id));
+      setExplorerSystemMessage(`Marked ${selectedProjectNode.name} for deletion`);
+      if (deletedFileIds.has(activeFileId) && fallbackActiveFileId) {
+        setActivePaneId(fallbackPane?.id || "pane-left");
+        setActiveFileId(fallbackActiveFileId);
+      }
       return;
     }
 
@@ -7142,7 +9249,7 @@ function App() {
     }
   }
 
-  function deleteProjectItemById(nodeId) {
+  async function deleteProjectItemById(nodeId) {
     const match = findProjectNode(projectTree, nodeId);
     if (!match || match.node.id === "root") return;
 
@@ -7158,6 +9265,62 @@ function App() {
         `Cannot delete ${match.node.name}; it is referenced by ${getReferenceSourceSummary(blockingReferences)}.`,
         "warning",
       );
+      return;
+    }
+
+    let deleteResult: any = null;
+
+    try {
+      deleteResult = await deleteProjectPathFromDatabase(selectedProjectPath, match.node.name);
+    } catch (error) {
+      setExplorerSystemMessage(error.message, "warning");
+      appendTerminalMessage(error.message, { source: "EXPLORER", level: "error", open: true });
+      return;
+    }
+
+    if (match.node.type === "file" && match.node.githubPath && match.node.githubSha) {
+      const nextTree = updateProjectNode(projectTree, match.node.id, (node) => ({
+        ...node,
+        deletedAt: deleteResult?.deletedAt || new Date().toISOString(),
+        draftDirty: true,
+      }));
+      const deletedFileIds = new Set([match.node.id]);
+      const nextVisibleFile = findFirstVisibleFile(nextTree);
+      const nextPanes = tabPanes.map((pane) => {
+        const nextTabs = pane.tabs.filter((fileId) => !deletedFileIds.has(fileId));
+        return {
+          ...pane,
+          tabs: nextTabs,
+          activeFileId: deletedFileIds.has(pane.activeFileId) ? nextTabs[0] || null : pane.activeFileId,
+        };
+      }).filter((pane) => pane.tabs.length > 0);
+      const safePanes = nextPanes.length
+        ? nextPanes
+        : nextVisibleFile
+          ? [{ id: "pane-left", label: "Left", tabs: [nextVisibleFile.id], activeFileId: nextVisibleFile.id }]
+          : [];
+      const fallbackPane = safePanes.find((pane) => pane.id === activePaneId) || safePanes[0];
+      const fallbackActiveFileId = fallbackPane?.activeFileId || nextVisibleFile?.id;
+
+      setProjectTree(nextTree);
+      setTabPanes(safePanes);
+      setFileHistories((current) => {
+        const nextHistories = { ...current };
+        deletedFileIds.forEach((id) => delete nextHistories[id]);
+        return nextHistories;
+      });
+      setSelectedPathsByFile((current) => {
+        const nextPaths = { ...current };
+        deletedFileIds.forEach((id) => delete nextPaths[id]);
+        return nextPaths;
+      });
+      setSelectedProjectId(fallbackActiveFileId || nextVisibleFile?.id || "root");
+      setSelectedGitCommitFileIds((currentIds) => new Set(currentIds).add(match.node.id));
+      setExplorerSystemMessage(`Marked ${match.node.name} for deletion`);
+      if (deletedFileIds.has(activeFileId) && fallbackActiveFileId) {
+        setActivePaneId(fallbackPane?.id || "pane-left");
+        setActiveFileId(fallbackActiveFileId);
+      }
       return;
     }
 
@@ -7268,6 +9431,13 @@ function App() {
   function commitXml(nextXml) {
     sourceEditBaseRef.current = null;
 
+    if (nextXml !== xml && activeFile?.githubPath && activeIsTextEditable) {
+      setDraftSaveState({
+        status: "pending",
+        message: `Draft changes pending for ${activeFile.name}.`,
+      });
+    }
+
     setHistory((current) => {
       if (nextXml === current.present) return current;
 
@@ -7362,12 +9532,111 @@ function App() {
   }
 
   function trackVisualTextEdit(path: number[], value: string, textNodeIndex: number | null = null) {
+    if (visualTextCommitTimerRef.current) {
+      clearTimeout(visualTextCommitTimerRef.current);
+      visualTextCommitTimerRef.current = null;
+    }
+
+    const caret = getAuthoringSelection();
+    const offset = caret?.kind === "caret" &&
+      pathKeyFor(caret.path) === pathKeyFor(path) &&
+      caret.childNodeIndex === (textNodeIndex ?? 0) &&
+      "offset" in caret
+      ? caret.offset
+      : value.length;
+
     pendingVisualEditRef.current = {
       fileId: activeFileId,
       path,
       textNodeIndex,
       value,
+      offset,
     };
+    if (activeFile?.githubPath && activeIsTextEditable) {
+      setDraftSaveState({
+        status: "pending",
+        message: `Draft changes pending for ${activeFile.name}.`,
+      });
+    }
+    scheduleSpellingCheck(path, value, textNodeIndex ?? 0);
+
+    visualTextCommitTimerRef.current = setTimeout(() => {
+      visualTextCommitTimerRef.current = null;
+      commitPendingVisualTextEdit();
+    }, 700);
+  }
+
+  function scheduleSpellingCheck(path: number[], value: string, textNodeIndex: number) {
+    if (spellingCheckTimerRef.current) {
+      clearTimeout(spellingCheckTimerRef.current);
+      spellingCheckTimerRef.current = null;
+    }
+
+    const requestId = spellingRequestIdRef.current + 1;
+    spellingRequestIdRef.current = requestId;
+    const fileId = activeFileId;
+    const sourceXml = xml;
+
+    runSpellingCheck(requestId, fileId, sourceXml, path, value, textNodeIndex);
+  }
+
+  function runSpellingCheck(
+    requestId: number,
+    fileId: string | null,
+    sourceXml: string,
+    path: number[],
+    value: string,
+    textNodeIndex: number,
+  ) {
+    if (requestId !== spellingRequestIdRef.current) return;
+
+    const targetPathKey = pathKeyFor(path);
+    const parsedSource = parseXml(sourceXml);
+    const node = parsedSource.doc ? getNodeByPath(parsedSource.doc, path) : null;
+    const strippedValue = stripEditableCaretSeed(value);
+
+    const updateTargetIssues = (targetIssues: SpellingIssue[]) => {
+      if (requestId !== spellingRequestIdRef.current) return;
+
+      setSpellingIssues((current) => [
+        ...current.filter((issue) => !(
+          issue.fileId === fileId &&
+          issue.pathKey === targetPathKey &&
+          issue.childNodeIndex === textNodeIndex
+        )),
+        ...targetIssues,
+      ]);
+    };
+
+    if (!node || isSpellcheckSkippedElement(node.tagName)) {
+      updateTargetIssues([]);
+      return;
+    }
+
+    const language = resolveXmlLanguageForElement(node);
+    const segment: SpellingTextSegment = {
+      text: strippedValue,
+      language,
+      fileId,
+      path,
+      childNodeIndex: textNodeIndex,
+    };
+
+    checkSpellingOnBackend([segment])
+      .then((issues) => {
+        updateTargetIssues(filterIgnoredSpellingIssues(issues));
+      })
+      .catch(() => {
+        updateTargetIssues(filterIgnoredSpellingIssues(
+          collectSpellingIssuesForText(
+            strippedValue,
+            language,
+            fileId,
+            path,
+            textNodeIndex,
+          ),
+        ));
+      });
   }
 
   function clearPendingVisualTextEdit(path: number[], textNodeIndex: number | null = null) {
@@ -7379,10 +9648,19 @@ function App() {
       pathKeyFor(pending.path) === pathKeyFor(path)
     ) {
       pendingVisualEditRef.current = null;
+      if (visualTextCommitTimerRef.current) {
+        clearTimeout(visualTextCommitTimerRef.current);
+        visualTextCommitTimerRef.current = null;
+      }
     }
   }
 
   function commitPendingVisualTextEdit() {
+    if (visualTextCommitTimerRef.current) {
+      clearTimeout(visualTextCommitTimerRef.current);
+      visualTextCommitTimerRef.current = null;
+    }
+
     const pending = pendingVisualEditRef.current;
     if (!pending || pending.fileId !== activeFileId || !activeIsXml) return false;
 
@@ -7403,6 +9681,13 @@ function App() {
       }
       childNode.textContent = pending.value;
     }
+
+    pendingCaretFocusRef.current = {
+      path: pending.path,
+      childNodeIndex: pending.textNodeIndex ?? 0,
+      offset: pending.offset ?? pending.value.length,
+    };
+    setPendingFocusPath(pending.path);
 
     flushSync(() => {
       updateXmlFromDoc(doc);
@@ -7425,6 +9710,23 @@ function App() {
 
     const focusPath = pendingFocusPath.join(".");
     const frame = requestAnimationFrame(() => {
+      const pendingCaret = pendingCaretFocusRef.current;
+      if (pendingCaret && pathKeyFor(pendingCaret.path) === focusPath) {
+        const caretTarget = document.querySelector(
+          `[data-node-path="${focusPath}"][data-text-node-index="${pendingCaret.childNodeIndex}"][contenteditable="true"]`,
+        ) || document.querySelector(`[data-node-path="${focusPath}"][contenteditable="true"]`);
+
+        if (caretTarget instanceof HTMLElement) {
+          caretTarget.focus();
+          setCaretByTextOffset(caretTarget, pendingCaret.offset);
+          caretRef.current = getAuthoringSelection();
+          pendingCaretFocusRef.current = null;
+          pendingFocusPlacementRef.current = "end";
+          setPendingFocusPath(null);
+          return;
+        }
+      }
+
       const target = document.querySelector(
         `[data-node-path="${focusPath}"][contenteditable="true"], textarea[data-node-path="${focusPath}"], [data-node-path="${focusPath}"] [contenteditable="true"]`,
       ) || document.querySelector(`[data-node-path="${focusPath}"]`);
@@ -7457,6 +9759,20 @@ function App() {
   }, [mode, pendingFocusPath, xml]);
 
   useEffect(() => {
+    if (!inlineExitCaret || mode === "source") return;
+
+    const frame = requestAnimationFrame(() => {
+      const target = document.querySelector('[data-inline-exit-caret="true"]');
+      if (!(target instanceof HTMLElement)) return;
+
+      target.focus();
+      setCaretByTextOffset(target, stripEditableCaretSeed(target.textContent || "").length);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [inlineExitCaret, mode]);
+
+  useEffect(() => {
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       if (!commandKey || event.key.toLowerCase() !== "z") return;
@@ -7487,6 +9803,12 @@ function App() {
       if (authoringSelection) {
         if (authoringSelection.kind !== "range" && caretRef.current?.kind === "range") return;
         caretRef.current = authoringSelection;
+        if (authoringSelection.path && !pathsEqual(authoringSelection.path, selectedPath)) {
+          setSelectedPath(authoringSelection.path);
+        }
+        if (authoringSelection.kind === "range") {
+          setCaretContextVersion((version) => version + 1);
+        }
       }
     }
 
@@ -7512,6 +9834,12 @@ function App() {
 
   function updateCaretSelection(caret) {
     caretRef.current = caret;
+    if (caret?.path && !pathsEqual(caret.path, selectedPath)) {
+      setSelectedPath(caret.path);
+    }
+    if (caret?.kind === "range") {
+      setCaretContextVersion((version) => version + 1);
+    }
     if (caret) {
       setPinnedAuthoringSelection(null);
     }
@@ -7548,6 +9876,7 @@ function App() {
     if (!node) return;
 
     node.textContent = value;
+    cleanupEmptyInlineElements(doc.documentElement);
     updateXmlFromDoc(doc);
   }
 
@@ -7561,6 +9890,7 @@ function App() {
     if (!childNode || childNode.nodeType !== Node.TEXT_NODE) return;
 
     childNode.textContent = value;
+    cleanupEmptyInlineElements(doc.documentElement);
     updateXmlFromDoc(doc);
   }
 
@@ -7571,10 +9901,35 @@ function App() {
     const node = getNodeByPath(doc, path);
     if (!node) return;
 
+    const previousValue = node.getAttribute(name);
     if (value.trim()) {
       node.setAttribute(name, value.trim());
     } else {
       node.removeAttribute(name);
+    }
+
+    if (node.tagName === "entry" && ["colname", "namest", "nameend"].includes(name)) {
+      const issue = getCalsHorizontalSpanIssue(node, name, previousValue);
+      if (issue) {
+        restoreAttributeValue(node, name, previousValue);
+        appendTerminalMessage(issue, { level: "warning", source: "Table", open: false });
+        return;
+      }
+      normalizeCalsRowAfterHorizontalSpanEdit(doc, node);
+    }
+
+    if (node.tagName === "entry" && name === "morerows") {
+      const issue = getCalsVerticalSpanIssue(node);
+      if (issue) {
+        if (previousValue === null) {
+          node.removeAttribute(name);
+        } else {
+          node.setAttribute(name, previousValue);
+        }
+        appendTerminalMessage(issue, { level: "warning", source: "Table", open: false });
+        return;
+      }
+      normalizeCalsRowsAfterVerticalSpanEdit(node);
     }
 
     updateXmlFromDoc(doc);
@@ -7735,9 +10090,266 @@ function App() {
     updateXmlFromDoc(doc);
   }
 
+  function createTableRowForContext(doc: Document, context: TableContext, referenceRow: Element | null = null): Element {
+    const rowTagName = context.model === "cals"
+      ? "row"
+      : context.model === "simple"
+        ? "strow"
+        : context.model === "choice"
+          ? "chrow"
+          : "property";
+    return createTableRowElement(doc, rowTagName, referenceRow) || doc.createElement(rowTagName);
+  }
+
+  function updateCalsTgroupColumnCount(context: TableContext, table: Element) {
+    syncCalsTgroupColumnCount(context.model, table);
+  }
+
+  function getDefaultTableRowParent(context: TableContext, table: Element): Element {
+    if (context.model !== "cals") return table;
+
+    const tgroup = table.tagName === "tgroup" ? table : table.getElementsByTagName("tgroup")[0];
+    const tbody = tgroup?.getElementsByTagName("tbody")[0];
+    return tbody || tgroup || table;
+  }
+
+  function runTableCommand(command: TableCommand, commandPath = selectedPath) {
+    if (!activeIsXml) return;
+
+    const { doc, error } = parseXml(xml);
+    if (error || !doc) return;
+
+    const validation = getTableCommandValidation(doc, commandPath, command);
+    if (!validation.enabled) {
+      if (validation.reason) {
+        appendTerminalMessage(validation.reason, { level: "warning", source: "Table", open: false });
+      }
+      return;
+    }
+
+    const context = findNearestTableContext(doc, commandPath);
+    if (!context) return;
+
+    const table = getNodeByPath(doc, context.tablePath);
+    const row = context.rowPath ? getNodeByPath(doc, context.rowPath) : null;
+    const cell = context.cellPath ? getNodeByPath(doc, context.cellPath) : null;
+    if (!table) return;
+
+    if (command === "insert-row-before" || command === "insert-row-after") {
+      const referenceRow = row || getTableRows(table, context.model)[0] || null;
+      const newRow = createTableRowForContext(doc, context, referenceRow);
+      const rowParent = referenceRow?.parentNode || getDefaultTableRowParent(context, table);
+      if (!rowParent) return;
+
+      if (command === "insert-row-before" && referenceRow) {
+        rowParent.insertBefore(newRow, referenceRow);
+      } else if (referenceRow) {
+        rowParent.insertBefore(newRow, referenceRow.nextSibling);
+      } else {
+        rowParent.appendChild(newRow);
+      }
+
+      updateCalsTgroupColumnCount(context, table);
+      const insertedPath = getPathForElement(doc, newRow) || context.tablePath;
+      setSelectedPath(getFirstEditablePath(newRow, insertedPath));
+      setPendingFocusPath(getFirstEditablePath(newRow, insertedPath));
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (command === "delete-row") {
+      if (!row?.parentNode) return;
+      const nextSelection = context.tablePath;
+      row.parentNode.removeChild(row);
+      updateCalsTgroupColumnCount(context, table);
+      setSelectedPath(nextSelection);
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (!context.canEditColumns) return;
+
+    const rows = getTableRows(table, context.model);
+    if (!rows.length) return;
+
+    const columnIndex = Math.max(0, context.columnIndex);
+    const cellTag = getTableCellTags(context.model)[0];
+
+    if (command === "insert-column-before" || command === "insert-column-after") {
+      if (context.model === "cals") {
+        if (!cell) return;
+        const grid = resolveCalsGrid(table);
+        const selectedCell = getCalsGridCellForEntry(grid, cell);
+        if (!selectedCell) return;
+        const insertAfterCol = command === "insert-column-before" ? selectedCell.startCol - 1 : selectedCell.endCol;
+        const result = insertCalsColumnAfterIndex(doc, table, insertAfterCol, selectedCell.row);
+        const focusCell = result?.selectedRowNewCell;
+        const focusPath = focusCell ? getPathForElement(doc, focusCell) : context.tablePath;
+        setSelectedPath(focusPath || context.tablePath);
+        if (focusPath) setPendingFocusPath(focusPath);
+        updateXmlFromDoc(doc);
+        return;
+      }
+
+      for (const currentRow of rows) {
+        const cells = getRowCells(currentRow, context.model);
+        const referenceCell = cells[Math.min(columnIndex, Math.max(0, cells.length - 1))] || null;
+        const newCell = createElementFor(doc, cellTag);
+        if (command === "insert-column-before" && referenceCell) {
+          currentRow.insertBefore(newCell, referenceCell);
+        } else if (referenceCell) {
+          currentRow.insertBefore(newCell, referenceCell.nextSibling);
+        } else {
+          currentRow.appendChild(newCell);
+        }
+      }
+
+      updateCalsTgroupColumnCount(context, table);
+      setSelectedPath(context.tablePath);
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (command === "delete-column") {
+      for (const currentRow of rows) {
+        const cells = getRowCells(currentRow, context.model);
+        const cell = cells[columnIndex];
+        if (cell?.parentNode) {
+          cell.parentNode.removeChild(cell);
+        }
+      }
+
+      updateCalsTgroupColumnCount(context, table);
+      setSelectedPath(context.tablePath);
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (command === "merge-right") {
+      if (context.model !== "cals" || !cell) return;
+      const grid = resolveCalsGrid(table);
+      const selectedCell = getCalsGridCellForEntry(grid, cell);
+      if (!selectedCell) return;
+      const rightCell = grid.rows[selectedCell.rowIndex]?.cells.find((candidate) => candidate.startCol === selectedCell.endCol + 1);
+      if (!rightCell) return;
+      const columnNames = getCalsColumnNames(table);
+      cell.setAttribute("namest", columnNames[selectedCell.startCol]);
+      cell.setAttribute("nameend", columnNames[rightCell.endCol]);
+      normalizeCalsRowAfterHorizontalSpanEdit(doc, cell);
+      const focusPath = getPathForElement(doc, cell) || context.cellPath || context.tablePath;
+      setSelectedPath(focusPath);
+      setPendingFocusPath(focusPath);
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (command === "merge-left") {
+      if (context.model !== "cals" || !cell) return;
+      const grid = resolveCalsGrid(table);
+      const selectedCell = getCalsGridCellForEntry(grid, cell);
+      if (!selectedCell) return;
+      const leftCell = grid.rows[selectedCell.rowIndex]?.cells.find((candidate) => candidate.endCol + 1 === selectedCell.startCol);
+      if (!leftCell) return;
+      const columnNames = getCalsColumnNames(table);
+      leftCell.entry.setAttribute("namest", columnNames[leftCell.startCol]);
+      leftCell.entry.setAttribute("nameend", columnNames[selectedCell.endCol]);
+      normalizeCalsRowAfterHorizontalSpanEdit(doc, leftCell.entry);
+      const focusPath = getPathForElement(doc, leftCell.entry) || context.cellPath || context.tablePath;
+      setSelectedPath(focusPath);
+      setPendingFocusPath(focusPath);
+      updateXmlFromDoc(doc);
+      return;
+    }
+
+    if (command === "split-cells") {
+      if (context.model !== "cals" || !cell) return;
+      if (!splitCalsSpannedCell(doc, cell)) return;
+      const focusPath = getPathForElement(doc, cell) || context.cellPath || context.tablePath;
+      setSelectedPath(focusPath);
+      setPendingFocusPath(focusPath);
+      updateXmlFromDoc(doc);
+    }
+  }
+
+  function toggleInlineRibbonElement(tagName: string) {
+    if (!activeIsXml || !isKnownInlineElement(tagName)) return false;
+
+    const { doc, error } = parseXml(xml);
+    if (error || !doc) return false;
+
+    const selectionPath = caretRef.current?.path || selectedPath;
+    const currentCaret = caretRef.current;
+    const path = Array.isArray(selectionPath) ? selectionPath : selectedPath;
+
+    for (let depth = path.length; depth >= 0; depth -= 1) {
+      const ancestorPath = path.slice(0, depth);
+      const node = getNodeByPath(doc, ancestorPath);
+      if (node?.nodeType === Node.ELEMENT_NODE && node.tagName === tagName) {
+        if (currentCaret?.kind === "range") {
+          const nextSelectedPath = ancestorPath.slice(0, -1);
+          const unwrapResult = unwrapElementAtPath(doc, ancestorPath);
+          if (!unwrapResult) return false;
+          setInlineExitCaret(null);
+          setSelectedPath(nextSelectedPath);
+          caretRef.current = {
+            kind: "caret",
+            path: nextSelectedPath,
+            childNodeIndex: Math.max(0, unwrapResult.focusChildNodeIndex),
+            offset: 0,
+          };
+          pendingCaretFocusRef.current = {
+            path: nextSelectedPath,
+            childNodeIndex: Math.max(0, unwrapResult.focusChildNodeIndex),
+            offset: 0,
+          };
+          pendingFocusPlacementRef.current = "start";
+          setPendingFocusPath(nextSelectedPath);
+          updateXmlFromDoc(doc);
+          return true;
+        }
+
+        const parentPath = ancestorPath.slice(0, -1);
+        const afterElementIndex = ancestorPath.at(-1) ?? 0;
+        if (isCaretAtEndOfElement(node, ancestorPath, currentCaret) && !hasMeaningfulContentAfterNode(node)) {
+          setInlineExitCaret({ parentPath, afterElementIndex, tagName });
+          setSelectedPath(parentPath);
+          caretRef.current = {
+            kind: "caret",
+            path: parentPath,
+            childNodeIndex: -1,
+            offset: 0,
+          };
+          return true;
+        }
+
+        const unwrapResult = unwrapElementAtPath(doc, ancestorPath);
+        if (!unwrapResult) return false;
+        setInlineExitCaret(null);
+        caretRef.current = {
+          kind: "caret",
+          path: parentPath,
+          childNodeIndex: Math.max(0, unwrapResult.focusChildNodeIndex),
+          offset: 0,
+        };
+        pendingCaretFocusRef.current = {
+          path: parentPath,
+          childNodeIndex: Math.max(0, unwrapResult.focusChildNodeIndex),
+          offset: 0,
+        };
+        pendingFocusPlacementRef.current = "start";
+        setSelectedPath(parentPath);
+        setPendingFocusPath(parentPath);
+        updateXmlFromDoc(doc);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function handleListItemEnter(path, currentText, textNodeIndex = null, caret = null) {
     const { doc, error } = parseXml(xml);
-    if (error) return;
+    if (error) return false;
 
     clearPendingVisualTextEdit(path, textNodeIndex);
     const authoringCaret = caret?.kind === "caret"
@@ -7745,14 +10357,15 @@ function App() {
       : caretRef.current?.kind === "caret"
         ? caretRef.current
         : getAuthoringSelection();
-    const insertedPath = splitListItemAtCaret(doc, path, currentText, textNodeIndex, authoringCaret);
-    if (!insertedPath) return;
+    const insertedPath = splitListItemSpecializationAtCaret(doc, path, currentText, textNodeIndex, authoringCaret);
+    if (!insertedPath) return false;
 
     const focusPath = getFirstEditablePath(getNodeByPath(doc, insertedPath), insertedPath);
     pendingFocusPlacementRef.current = "start";
     setSelectedPath(focusPath);
     setPendingFocusPath(focusPath);
     updateXmlFromDoc(doc);
+    return true;
   }
 
   function handleParagraphEnter(path, currentText, textNodeIndex = null, caret = null) {
@@ -7775,19 +10388,62 @@ function App() {
     updateXmlFromDoc(doc);
   }
 
+  function commitInlineExitText(parentPath: number[], afterElementIndex: number, value: string) {
+    const nextText = stripEditableCaretSeed(value);
+    if (!nextText) {
+      setInlineExitCaret(null);
+      return;
+    }
+
+    const { doc, error } = parseXml(xml);
+    if (error) return;
+
+    const parent = getNodeByPath(doc, parentPath);
+    const referenceElement = parent ? elementChildren(parent)[afterElementIndex] : null;
+    if (!parent || !referenceElement) return;
+
+    const textNode = doc.createTextNode(nextText);
+    parent.insertBefore(textNode, referenceElement.nextSibling);
+
+    const childNodeIndex = Array.from(parent.childNodes).indexOf(textNode);
+    const nextCaret = {
+      kind: "caret",
+      path: parentPath,
+      childNodeIndex,
+      offset: nextText.length,
+    };
+    setInlineExitCaret(null);
+    setSelectedPath(parentPath);
+    caretRef.current = nextCaret;
+    pendingCaretFocusRef.current = nextCaret;
+    pendingFocusPlacementRef.current = "end";
+    setPendingFocusPath(parentPath);
+    updateXmlFromDoc(doc);
+  }
+
   function openContextMenu(event, path) {
     if (!parsed.doc) return;
 
     event.preventDefault();
     event.stopPropagation();
 
+    const textPoint = getTextOffsetAtPoint(event.clientX, event.clientY);
+    const spellingIssue = textPoint
+      ? activeSpellingIssues.find((issue) => (
+          issue.pathKey === textPoint.pathKey &&
+          issue.childNodeIndex === textPoint.childNodeIndex &&
+          textPoint.offset >= issue.startOffset &&
+          textPoint.offset <= issue.endOffset
+        )) || null
+      : null;
     const liveSelection = getAuthoringSelection();
     const authoringSelection = liveSelection?.kind === "range"
       ? liveSelection
       : caretRef.current?.kind === "range"
         ? caretRef.current
         : liveSelection || caretRef.current;
-    const insertContext = getInsertContext(parsed.doc, path);
+    const insertContext = getInsertContext(parsed.doc, path, authoringSelection);
+    const tableOptions = getTableContextMenuOptions(parsed.doc, path);
 
     if (authoringSelection?.kind === "range") {
       caretRef.current = authoringSelection;
@@ -7798,10 +10454,9 @@ function App() {
       y: event.clientY,
       path,
       authoringSelection,
-      insertContext: {
-        ...insertContext,
-        surroundOptions: getAllowedSurroundOptions(parsed.doc, authoringSelection),
-      },
+      insertContext,
+      spellingIssue,
+      tableOptions,
     });
 
     const range = contextSelectionRangeRef.current;
@@ -7814,17 +10469,78 @@ function App() {
     }
   }
 
+  function replaceSpellingIssue(issue: SpellingIssue, replacement: string) {
+    const { doc, error } = parseXml(xml);
+    if (error || !doc) return;
+
+    const node = getNodeByPath(doc, issue.path);
+    const textNode = node?.childNodes[issue.childNodeIndex];
+    if (!node || !textNode || textNode.nodeType !== Node.TEXT_NODE) return;
+
+    const currentText = textNode.textContent || "";
+    const nextText = `${currentText.slice(0, issue.startOffset)}${replacement}${currentText.slice(issue.endOffset)}`;
+    textNode.textContent = nextText;
+    setContextMenu(null);
+    setSpellingIssues((current) => current.filter((candidate) => candidate.id !== issue.id));
+    updateXmlFromDoc(doc);
+  }
+
+  function ignoreSpellingIssue(issue: SpellingIssue) {
+    ignoredSpellingIssueIdsRef.current.add(issue.id);
+    setContextMenu(null);
+    setSpellingIssues((current) => current.filter((candidate) => candidate.id !== issue.id));
+  }
+
+  async function addSpellingIssueToDictionary(issue: SpellingIssue) {
+    setContextMenu(null);
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/spelling/dictionary`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await getBackendAuthHeaders()),
+        },
+        body: JSON.stringify({
+          word: issue.word,
+          language: issue.language,
+        }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not add word to dictionary.");
+      }
+
+      const normalizedWord = issue.word.toLowerCase();
+      const normalizedLanguage = issue.language.toLowerCase().startsWith("en") ? "en" : issue.language.toLowerCase();
+      setSpellingIssues((current) => current.filter((candidate) => !(
+        candidate.word.toLowerCase() === normalizedWord &&
+        (candidate.language.toLowerCase().startsWith("en") ? "en" : candidate.language.toLowerCase()) === normalizedLanguage
+      )));
+      appendTerminalMessage(`Added "${issue.word}" to your spelling dictionary.`, {
+        source: "SPELLING",
+        level: "info",
+        open: false,
+      });
+    } catch (error) {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not add word to dictionary.", {
+        source: "SPELLING",
+        level: "warning",
+        open: false,
+      });
+    }
+  }
+
   function removeSelected() {
     if (selectedPath.length === 0) return;
 
     const { doc, error } = parseXml(xml);
     if (error) return;
 
-    const node = getNodeByPath(doc, selectedPath);
-    if (!node || !node.parentElement) return;
+    const nextPath = removeElementWithSchemaCleanup(doc, selectedPath);
+    if (!nextPath) return;
 
-    const nextPath = selectedPath.slice(0, -1);
-    node.remove();
     setSelectedPath(nextPath);
     updateXmlFromDoc(doc);
   }
@@ -7942,6 +10658,16 @@ function App() {
       setBottomPanelOpen(true);
     } else if (command === "specializations") {
       openSpecializationsTab();
+    } else if (command === "visualTemplates") {
+      openVisualTemplatesTab();
+    } else if (command === "createVisualTemplate") {
+      createNewVisualTemplateBinding();
+    } else if (command === "openVisualTemplate") {
+      setVisualTemplatePickerMode("open");
+    } else if (command === "uploadVisualTemplate") {
+      setVisualTemplateUploadOpen(true);
+    } else if (command === "importVisualTemplate") {
+      setVisualTemplateImportOpen(true);
     }
   }
 
@@ -8017,6 +10743,143 @@ function App() {
     loadSpecializations();
   }
 
+  function openVisualTemplatesTab(model = visualTemplateModel) {
+    const paneId = activePaneId || "pane-left";
+    setFileHistories((current) => current[visualTemplatesTabId]
+      ? current
+      : {
+          ...current,
+          [visualTemplatesTabId]: {
+            past: [],
+            present: JSON.stringify(model, null, 2),
+            future: [],
+          },
+        });
+    setTabPanes((panes) => panes.map((pane) => (
+      pane.id === paneId
+        ? {
+            ...pane,
+            tabs: pane.tabs.includes(visualTemplatesTabId) ? pane.tabs : [...pane.tabs, visualTemplatesTabId],
+            activeFileId: visualTemplatesTabId,
+          }
+        : pane
+    )));
+    setActivePaneId(paneId);
+    setActiveFileId(visualTemplatesTabId);
+    setSelectedProjectId(null);
+    setActiveSidePanel(null);
+  }
+
+  function getVisualTemplateCatalog() {
+    const templates = [
+      {
+        id: defaultVisualTemplateModel.template.id,
+        name: defaultVisualTemplateModel.template.name,
+        description: "Default responsive topic deliverable layout with hero, body, summary, and sidebar containers.",
+        source: "built-in",
+        regions: defaultVisualTemplateModel.regions,
+      },
+    ];
+    const currentTemplate = visualTemplateModel.template;
+    if (currentTemplate?.id && !templates.some((template) => template.id === currentTemplate.id)) {
+      templates.push({
+        id: currentTemplate.id,
+        name: currentTemplate.name || "Current template",
+        description: "Template currently loaded in the binding workbench.",
+        source: currentTemplate.source || "current",
+        regions: visualTemplateModel.regions,
+      });
+    }
+    return templates;
+  }
+
+  function startTemplateBindingFromTemplate(template) {
+    const nextModel = normalizeVisualTemplateModel({
+      ...defaultVisualTemplateModel,
+      id: `binding-${slugifySpecializationName(template.name || template.id || "template") || Date.now().toString(36)}`,
+      name: `Binding - ${template.name || "Template"}`,
+      template: {
+        id: template.id,
+        name: template.name,
+        source: template.source || "template",
+      },
+      filePath: "",
+      regions: (template.regions || defaultVisualTemplateModel.regions).map((region) => ({
+        ...region,
+        sourceFileId: undefined,
+        sourceKind: undefined,
+        sourceName: undefined,
+        sourcePath: undefined,
+      })),
+    });
+    setVisualTemplateModel(nextModel);
+    setVisualTemplateSourceId(null);
+    openVisualTemplatesTab(nextModel);
+  }
+
+  function createNewVisualTemplateBinding() {
+    const templateName = `New template ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    startTemplateBindingFromTemplate({
+      id: `template-${Date.now().toString(36)}`,
+      name: templateName,
+      description: "New template definition. The first version uses the default container structure until the template designer is expanded.",
+      source: "new",
+      regions: defaultVisualTemplateModel.regions,
+    });
+  }
+
+  async function uploadVisualTemplateFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const uploadedTemplate = normalizeVisualTemplateModel({
+        ...parsed,
+        template: {
+          id: parsed.template?.id || `uploaded-${slugifySpecializationName(file.name) || Date.now().toString(36)}`,
+          name: parsed.template?.name || parsed.name || file.name.replace(/\.[^./]+$/i, ""),
+          source: "uploaded",
+        },
+        filePath: "",
+      });
+      startTemplateBindingFromTemplate({
+        id: uploadedTemplate.template.id,
+        name: uploadedTemplate.template.name,
+        description: `Uploaded from ${file.name}.`,
+        source: "uploaded",
+        regions: uploadedTemplate.regions,
+      });
+      appendTerminalMessage(`Uploaded template ${file.name}. Create bindings and save the binding document when ready.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      setVisualTemplateUploadOpen(false);
+    } catch (error) {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not upload template. Use a JSON template file for now.", {
+        level: "error",
+        source: "Templates",
+        open: false,
+      });
+    }
+  }
+
+  function startImportedVisualTemplate(provider: "canva" | "figma") {
+    const providerLabel = provider === "figma" ? "Figma" : "Canva";
+    startTemplateBindingFromTemplate({
+      id: `${provider}-template-${Date.now().toString(36)}`,
+      name: `${providerLabel} imported template`,
+      description: `${providerLabel} import placeholder. Later this will connect to the provider and map frames/components to containers and slots.`,
+      source: provider,
+      regions: defaultVisualTemplateModel.regions,
+    });
+    appendTerminalMessage(`${providerLabel} template import is staged as a placeholder. Provider connection and mapping rules come next.`, {
+      level: "info",
+      source: "Templates",
+      open: false,
+    });
+    setVisualTemplateImportOpen(false);
+  }
+
   function openAuthoringProfileTab(documentType: string) {
     const tabFile = createAuthoringProfileTabFile(documentType);
     const paneId = activePaneId || "pane-left";
@@ -8045,11 +10908,247 @@ function App() {
     setActiveSidePanel(null);
   }
 
-  function insertRibbonElement(tagName: string) {
-    if (!activeIsXml || !ribbonAllowedTags.has(tagName)) return;
+  function getCollapsedInlineShortcutContext(tagName: string) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
 
-    const placement = insertContext.childOptions.includes(tagName) ? "child" : "after";
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return null;
+
+    const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement;
+    const inlineElement = startElement?.closest?.(`[data-dita-tag="${tagName}"]`) as HTMLElement | null;
+    if (!inlineElement) return null;
+
+    const inlinePath = parsePathValue(inlineElement.dataset.nodePath);
+    if (!inlinePath.length) return null;
+
+    const textLength = stripEditableCaretSeed(inlineElement.textContent || "").length;
+    const offset = stripEditableCaretSeed(range.toString()).length || getRangeTextOffsetWithin(inlineElement, range);
+    let sibling = inlineElement.nextSibling;
+    let hasContentAfter = false;
+
+    while (sibling) {
+      if (sibling instanceof HTMLElement && sibling.dataset.inlineExitCaret === "true") {
+        sibling = sibling.nextSibling;
+        continue;
+      }
+
+      if (sibling.nodeType === Node.ELEMENT_NODE) {
+        hasContentAfter = true;
+        break;
+      }
+
+      if (sibling.nodeType === Node.TEXT_NODE && stripEditableCaretSeed(sibling.textContent || "").trim()) {
+        hasContentAfter = true;
+        break;
+      }
+
+      sibling = sibling.nextSibling;
+    }
+
+    return {
+      afterElementIndex: inlinePath.at(-1) ?? 0,
+      atEnd: offset >= textLength,
+      hasContentAfter,
+      parentPath: inlinePath.slice(0, -1),
+    };
+  }
+
+  function insertRibbonElement(tagName: string) {
+    if (!activeIsXml) return;
+
+    if (isKnownInlineElement(tagName)) {
+      const inlineContext = getCollapsedInlineShortcutContext(tagName);
+      if (inlineContext) {
+        if (inlineContext.atEnd && !inlineContext.hasContentAfter) {
+          setInlineExitCaret({
+            parentPath: inlineContext.parentPath,
+            afterElementIndex: inlineContext.afterElementIndex,
+            tagName,
+          });
+          setSelectedPath(inlineContext.parentPath);
+          caretRef.current = {
+            kind: "caret",
+            path: inlineContext.parentPath,
+            childNodeIndex: -1,
+            offset: 0,
+          };
+        }
+
+        if (!inlineContext.atEnd || inlineContext.hasContentAfter) {
+          toggleInlineRibbonElement(tagName);
+        }
+
+        return;
+      }
+    }
+
+    if (isKnownInlineElement(tagName) && toggleInlineRibbonElement(tagName)) {
+      return;
+    }
+
+    if (!ribbonAllowedTags.has(tagName)) return;
+
+    const placement = insertContext.childOptions.includes(tagName)
+      ? "child"
+      : insertContext.siblingOptions.includes(tagName)
+        ? "after"
+        : "surround";
     insertElement(tagName, placement);
+  }
+
+  function moveCaretToPreviousEditableRun(target: HTMLElement): boolean {
+    const activeWorkbench = target.closest(".visual-workbench");
+    if (!activeWorkbench) return false;
+
+    const editableRuns = Array.from(
+      activeWorkbench.querySelectorAll('[contenteditable="true"][data-node-path][data-text-node-index]'),
+    ).filter((candidate): candidate is HTMLElement => candidate instanceof HTMLElement);
+    const currentIndex = editableRuns.indexOf(target);
+    if (currentIndex <= 0) return false;
+
+    const previousRun = editableRuns[currentIndex - 1];
+    previousRun.focus();
+    setCaretByTextOffset(previousRun, stripEditableCaretSeed(previousRun.textContent || "").length);
+    caretRef.current = getAuthoringSelection();
+    return true;
+  }
+
+  function focusTableCell(doc: Document, cell: Element | null) {
+    const cellPath = cell ? getPathForElement(doc, cell) : null;
+    if (!cellPath) return false;
+
+    const focusPath = getFirstEditablePath(cell, cellPath);
+    pendingFocusPlacementRef.current = "start";
+    setSelectedPath(focusPath);
+    setPendingFocusPath(focusPath);
+    return true;
+  }
+
+  function handleAuthoringTableTabKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return false;
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return false;
+    if (!target.closest('[contenteditable="true"]')) return false;
+
+    const { doc, error } = parseXml(xml);
+    if (error || !doc) return false;
+
+    const authoringSelection = getAuthoringSelection();
+    const selectionPath = authoringSelection?.path || caretRef.current?.path || selectedPath;
+    const context = findNearestTableContext(doc, selectionPath);
+    if (!context?.cellPath || !context.rowPath) return false;
+
+    const table = getNodeByPath(doc, context.tablePath);
+    const row = getNodeByPath(doc, context.rowPath);
+    const cell = getNodeByPath(doc, context.cellPath);
+    if (!table || !row || !cell) return false;
+
+    const rows = getTableRows(table, context.model);
+    const rowIndex = rows.indexOf(row);
+    const cells = getRowCells(row, context.model);
+    const cellIndex = cells.indexOf(cell);
+    if (rowIndex < 0 || cellIndex < 0) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.shiftKey) {
+      const previousCell = cellIndex > 0
+        ? cells[cellIndex - 1]
+        : rowIndex > 0
+          ? getRowCells(rows[rowIndex - 1], context.model).at(-1) || null
+          : null;
+      return focusTableCell(doc, previousCell);
+    }
+
+    const nextCell = cellIndex < cells.length - 1
+      ? cells[cellIndex + 1]
+      : rowIndex < rows.length - 1
+        ? getRowCells(rows[rowIndex + 1], context.model)[0] || null
+        : null;
+
+    if (nextCell) {
+      return focusTableCell(doc, nextCell);
+    }
+
+    const newRow = createTableRowForContext(doc, context, row);
+    if (!row.parentNode) return true;
+
+    row.parentNode.insertBefore(newRow, row.nextSibling);
+    updateCalsTgroupColumnCount(context, table);
+    const firstCell = getRowCells(newRow, context.model)[0] || null;
+    const focused = focusTableCell(doc, firstCell);
+    updateXmlFromDoc(doc);
+    return focused;
+  }
+
+  function handleAuthoringBackspaceKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Backspace" || event.metaKey || event.ctrlKey || event.altKey) return false;
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return false;
+    if (!target.matches('[contenteditable="true"][data-node-path][data-text-node-index]')) return false;
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !target.contains(range.startContainer)) return false;
+
+    const offset = getRangeTextOffsetWithin(target, range);
+    if (offset > 0) return false;
+
+    if (!moveCaretToPreviousEditableRun(target)) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+
+  function handleAuthoringShortcutKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (handleAuthoringTableTabKeyDown(event)) return;
+    if (handleAuthoringBackspaceKeyDown(event)) return;
+
+    const shortcutKey = event.key.toLowerCase();
+    const commandKey = event.metaKey || event.ctrlKey;
+    const tagName = shortcutKey === "b"
+      ? "b"
+      : shortcutKey === "i"
+        ? "i"
+        : shortcutKey === "u"
+          ? "u"
+          : "";
+
+    if (!commandKey || event.altKey) return;
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("textarea, input, select")) return;
+    if (!target.closest('[contenteditable="true"]')) return;
+
+    if (!tagName) {
+      const allowedBrowserEditingShortcuts = new Set(["a", "c", "v", "x", "y", "z"]);
+      if (!allowedBrowserEditingShortcuts.has(shortcutKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const authoringSelection = getAuthoringSelection();
+    if (authoringSelection) {
+      caretRef.current = authoringSelection;
+      updateCaretSelection(authoringSelection);
+    }
+
+    insertRibbonElement(tagName);
   }
 
   async function getBackendAuthHeaders() {
@@ -8555,6 +11654,96 @@ function App() {
     })));
   }
 
+  async function discardGitHubDraft(node) {
+    if (!node?.githubPath) return;
+
+    const displayName = node.name || node.githubPath;
+    setGitSystemMessage(`Discarding changes for ${displayName}...`);
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/drafts/github/discard`, {
+        method: "POST",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ path: node.githubPath }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(body.error || `Could not discard changes for ${displayName}.`);
+      }
+
+      setSelectedGitCommitFileIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.delete(node.id);
+        return nextIds;
+      });
+
+      if (body.action === "removed-local-file") {
+        closeTab(node.id);
+        setProjectTree((currentTree) => removeProjectNode(currentTree, node.id));
+        setFileHistories((current) => {
+          const next = { ...current };
+          delete next[node.id];
+          return next;
+        });
+        setSelectedPathsByFile((current) => {
+          const next = { ...current };
+          delete next[node.id];
+          return next;
+        });
+        setGitSystemMessage(`Discarded ${displayName}; the unpublished file was removed.`);
+        return;
+      }
+
+      const reloadedFile = await loadGitHubFileIfNeeded({
+        ...node,
+        deletedAt: null,
+        draftDirty: false,
+        draftLoaded: false,
+        draftSavedAt: null,
+        draftContentHash: "",
+        githubLoaded: false,
+      });
+
+      if (reloadedFile) {
+        setFileHistories((current) => ({
+          ...current,
+          [node.id]: {
+            past: [],
+            present: reloadedFile.content || "",
+            future: [],
+          },
+        }));
+        setProjectTree((currentTree) => updateProjectNode(currentTree, node.id, (currentNode) => ({
+          ...currentNode,
+          ...reloadedFile,
+          deletedAt: null,
+          draftDirty: false,
+          draftLoaded: false,
+          draftSavedAt: null,
+          draftContentHash: "",
+        })));
+      } else {
+        setProjectTree((currentTree) => updateProjectNode(currentTree, node.id, (currentNode) => ({
+          ...currentNode,
+          deletedAt: null,
+          draftDirty: false,
+          draftLoaded: false,
+          draftSavedAt: null,
+          draftContentHash: "",
+          githubLoaded: false,
+        })));
+      }
+
+      setGitSystemMessage(`Discarded changes for ${displayName}.`);
+    } catch (error) {
+      setGitSystemMessage(error instanceof Error ? error.message : `Could not discard changes for ${displayName}.`, "error");
+    }
+  }
+
   async function commitSelectedGitHubDraftsLocally() {
     const selectedFiles = draftBackedFiles.filter(({ node }) => selectedGitCommitFileIds.has(node.id));
     const message = gitCommitMessage.trim();
@@ -8565,7 +11754,9 @@ function App() {
     setGitSystemMessage(`Saving ${selectedFiles.length} draft${selectedFiles.length === 1 ? "" : "s"} before commit...`);
 
     try {
-      await Promise.all(selectedFiles.map(({ node }) => saveDraftForGitCommit(node)));
+      await Promise.all(selectedFiles
+        .filter(({ node }) => !node.deletedAt)
+        .map(({ node }) => saveDraftForGitCommit(node)));
       setGitSystemMessage(`Creating local commit for ${selectedFiles.length} file${selectedFiles.length === 1 ? "" : "s"}...`);
 
       const response = await fetch(`${backendBaseUrl}/api/github/local-commits`, {
@@ -8627,7 +11818,7 @@ function App() {
         throw new Error(body.error || "Could not publish local commits to GitHub.");
       }
 
-      const publishedFilesByPath = new Map<string, { path: string; sha: string; contentHash: string }>(
+      const publishedFilesByPath = new Map<string, { path: string; sha: string; contentHash: string; changeType?: string }>(
         (body.files || []).map((file) => [normalizeProjectPath(file.path), file]),
       );
 
@@ -8638,6 +11829,11 @@ function App() {
           const publishedFile = publishedFilesByPath.get(normalizeProjectPath(node.githubPath));
           if (!publishedFile) return;
 
+          if (publishedFile.changeType === "delete") {
+            nextTree = removeProjectNode(nextTree, node.id);
+            return;
+          }
+
           nextTree = updateProjectNode(nextTree, node.id, (currentNode) => ({
             ...currentNode,
             githubSha: publishedFile.sha || currentNode.githubSha || "",
@@ -8645,6 +11841,7 @@ function App() {
             draftContentHash: publishedFile.contentHash || currentNode.draftContentHash || "",
             draftDirty: false,
             draftSavedAt: new Date().toISOString(),
+            deletedAt: null,
           }));
         });
         return nextTree;
@@ -9255,6 +12452,988 @@ function App() {
     );
   }
 
+  function createVisualTemplateSourceFromFile(node, path) {
+    const normalizedPath = normalizeProjectPath(path || node.githubPath || node.name || "");
+    const content = fileHistories[node.id]?.present ?? node.content ?? "";
+    const parsedSource = parseXml(content);
+    const rootName = parsedSource.doc?.documentElement?.tagName || node.ditaType || "xml";
+    const title = parsedSource.doc
+      ? parsedSource.doc.getElementsByTagName("title")[0]?.textContent?.trim() || node.name
+      : node.name;
+    const shortdesc = parsedSource.doc?.getElementsByTagName("shortdesc")[0]?.textContent?.trim() || "";
+    const body = parsedSource.doc
+      ? Array.from(parsedSource.doc.getElementsByTagName("p") as HTMLCollectionOf<Element>)
+          .slice(0, 3)
+          .map((paragraph) => paragraph.textContent?.trim())
+          .filter(Boolean)
+      : [];
+    const topicrefs = parsedSource.doc
+      ? Array.from(parsedSource.doc.getElementsByTagName("topicref") as HTMLCollectionOf<Element>)
+          .map((topicref) => topicref.getAttribute("href") || topicref.getAttribute("navtitle") || "")
+          .filter(Boolean)
+      : [];
+
+    return {
+      id: node.id,
+      name: node.name,
+      path: normalizedPath,
+      githubPath: normalizeProjectPath(node.githubPath || ""),
+      rootName,
+      title,
+      shortdesc,
+      body,
+      topicrefs,
+    };
+  }
+
+  function getVisualTemplateSources() {
+    return collectProjectFiles(projectTree)
+      .filter(({ node }) => node.type === "file")
+      .filter(({ node }) => getProjectFileKind(node) === "xml")
+      .map(({ node, path }) => createVisualTemplateSourceFromFile(node, path));
+  }
+
+  function getVisualTemplatePathVariants(value = "") {
+    const normalized = normalizeProjectPath(value);
+    const withoutContentRoot = normalized.replace(/^content\//, "");
+    const withContentRoot = withoutContentRoot ? normalizeProjectPath(`content/${withoutContentRoot}`) : "";
+    return new Set([normalized, withoutContentRoot, withContentRoot].filter(Boolean));
+  }
+
+  function visualTemplateSourceMatchesDrop(source, droppedSource) {
+    if (!source || !droppedSource) return false;
+    if (source.id && droppedSource.id && source.id === droppedSource.id) return true;
+
+    const sourcePaths = new Set([
+      ...getVisualTemplatePathVariants(source.path),
+      ...getVisualTemplatePathVariants(source.githubPath),
+      ...getVisualTemplatePathVariants(source.href),
+    ]);
+    const droppedPaths = [
+      ...getVisualTemplatePathVariants(droppedSource.path),
+      ...getVisualTemplatePathVariants(droppedSource.githubPath),
+      ...getVisualTemplatePathVariants(droppedSource.href),
+    ];
+
+    return droppedPaths.some((path) => sourcePaths.has(path));
+  }
+
+  function findVisualTemplateSourceForDrop(droppedSource, sources) {
+    return sources.find((source) => visualTemplateSourceMatchesDrop(source, droppedSource)) || null;
+  }
+
+  function getVisualTemplateBindingValue(source, binding: string) {
+    if (!source) {
+      if (binding === "bodyParagraphs") return ["Paragraph and section content will flow here."];
+      if (binding === "topicrefs") return [];
+      return "";
+    }
+
+    if (binding === "title") return source.title || source.name;
+    if (binding === "shortdesc") return source.shortdesc || "Short description slot";
+    if (binding === "bodyParagraphs") return source.body?.length ? source.body : ["Paragraph and section content will flow here."];
+    if (binding === "topicrefs") return source.topicrefs || [];
+    if (binding === "rootName") return source.rootName;
+    if (binding === "path") return source.path;
+    return "";
+  }
+
+  function getVisualTemplateBindingOptions(source) {
+    const baseOptions = [
+      { value: "title", label: "Title", detail: "Document title" },
+      { value: "shortdesc", label: "Shortdesc", detail: "Short description" },
+      { value: "bodyParagraphs", label: "Body paragraphs", detail: "Main content" },
+      { value: "topicrefs", label: "Topicrefs", detail: "Map links" },
+      { value: "rootName", label: "Root element", detail: "DITA type" },
+      { value: "path", label: "File path", detail: "Source path" },
+    ];
+
+    if (!source) return baseOptions.map((option) => ({ ...option, hasValue: false }));
+
+    return baseOptions.map((option) => {
+      const value = getVisualTemplateBindingValue(source, option.value);
+      const hasValue = Array.isArray(value) ? value.length > 0 : Boolean(String(value || "").trim());
+      return { ...option, hasValue };
+    });
+  }
+
+  function getVisualTemplateBindingPreview(source, binding: string) {
+    const value = getVisualTemplateBindingValue(source, binding);
+    if (Array.isArray(value)) {
+      if (!value.length) return "No values found";
+      return value.slice(0, 3).join(" · ");
+    }
+    return String(value || "No value found");
+  }
+
+  function getVisualTemplateSourceLabel(source) {
+    if (!source) return "";
+    const title = source.title && source.title !== source.name ? ` — ${source.title}` : "";
+    return `${source.name}${title}`;
+  }
+
+  function getVisualTemplateSlotLabel(binding = "") {
+    const option = getVisualTemplateBindingOptions(null).find((item) => item.value === binding);
+    return option?.label || binding || "Slot";
+  }
+
+  function setVisualTemplateRegionSource(regionId: string, sourceId: string) {
+    if (!sourceId) {
+      resetVisualTemplateRegion(regionId);
+      return;
+    }
+
+    const source = getVisualTemplateBoundSources().find((item) => item.id === sourceId);
+    if (!source) return;
+    updateVisualTemplateRegion(regionId, {
+      sourceFileId: source.id,
+      sourcePath: source.path,
+      sourceName: source.name,
+      sourceKind: source.rootName,
+    });
+    setVisualTemplateSourceId(source.id);
+  }
+
+  function updateVisualTemplateRegion(regionId: string, updates: Record<string, any>) {
+    setVisualTemplateModel((current) => ({
+      ...current,
+      regions: current.regions.map((region) => (
+        region.id === regionId ? { ...region, ...updates } : region
+      )),
+    }));
+  }
+
+  function updateVisualTemplateRegionStyle(regionId: string, styleKey: "style" | "textStyle", updates: Record<string, any>) {
+    setVisualTemplateModel((current) => ({
+      ...current,
+      regions: current.regions.map((region) => (
+        region.id === regionId
+          ? {
+              ...region,
+              [styleKey]: {
+                ...(styleKey === "style" ? visualTemplateStyleDefaults.style : visualTemplateStyleDefaults.textStyle),
+                ...(region[styleKey] || {}),
+                ...updates,
+              },
+            }
+          : region
+      )),
+    }));
+  }
+
+  function getVisualTemplateCssStyle(region: any): React.CSSProperties {
+    const style = normalizeVisualTemplateStyle(region?.style, visualTemplateStyleDefaults.style);
+    const shadowPreset = String(style.shadowPreset || "none");
+    const shadowValue = shadowPreset === "none"
+      ? undefined
+      : shadowPreset === "soft"
+        ? `0 18px 38px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 14)}`
+        : shadowPreset === "lifted"
+          ? `0 10px 18px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 18)}, 0 2px 6px ${rgbaFromHexColor(style.shadowColor || "#23406f", 10)}`
+          : `${Number(style.shadowX ?? 0)}px ${Number(style.shadowY ?? 12)}px ${Number(style.shadowBlur ?? 24)}px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 12)}`;
+    const animationName = String(style.animationName || "none");
+    const surfaceBackground = style.fillMode === "gradient"
+      ? `linear-gradient(${Number(style.gradientAngle ?? 135)}deg, ${style.gradientFrom || style.backgroundColor || "#ffffff"}, ${style.gradientTo || "#eef5ff"})`
+      : style.backgroundColor || undefined;
+    const imageBackground = style.backgroundImageMode === "image" && style.backgroundImage
+      ? cssUrlValue(style.backgroundImage)
+      : "";
+    const overlayBackground = imageBackground && Number(style.backgroundOverlayOpacity || 0) > 0
+      ? `linear-gradient(${rgbaFromHexColor(style.backgroundOverlayColor || "#000000", style.backgroundOverlayOpacity)}, ${rgbaFromHexColor(style.backgroundOverlayColor || "#000000", style.backgroundOverlayOpacity)})`
+      : "";
+    const backgrounds = [overlayBackground, imageBackground, surfaceBackground].filter(Boolean);
+    const backgroundLayerCount = backgrounds.length;
+    const imageLayerPosition = style.backgroundPosition || "center";
+    const imageLayerRepeat = style.backgroundRepeat || "no-repeat";
+    const imageLayerSize = style.backgroundSize || "cover";
+    const layeredBackgroundPosition = imageBackground
+      ? (overlayBackground ? ["center", imageLayerPosition, "center"] : [imageLayerPosition, "center"]).slice(0, backgroundLayerCount).join(", ")
+      : undefined;
+    const layeredBackgroundRepeat = imageBackground
+      ? (overlayBackground ? ["no-repeat", imageLayerRepeat, "no-repeat"] : [imageLayerRepeat, "no-repeat"]).slice(0, backgroundLayerCount).join(", ")
+      : undefined;
+    const layeredBackgroundSize = imageBackground
+      ? (overlayBackground ? ["cover", imageLayerSize, "cover"] : [imageLayerSize, "cover"]).slice(0, backgroundLayerCount).join(", ")
+      : undefined;
+    return {
+      animationDelay: animationName === "none" ? undefined : `${Number(style.animationDelay ?? 0)}ms`,
+      animationDuration: animationName === "none" ? undefined : `${Number(style.animationDuration ?? 600)}ms`,
+      animationName: animationName === "none" ? undefined : `visual-template-${animationName}`,
+      animationTimingFunction: animationName === "none" ? undefined : "ease",
+      background: backgrounds.length ? backgrounds.join(", ") : undefined,
+      backgroundPosition: layeredBackgroundPosition,
+      backgroundRepeat: layeredBackgroundRepeat,
+      backgroundSize: layeredBackgroundSize,
+      borderColor: style.borderColor || undefined,
+      borderRadius: Number.isFinite(Number(style.borderRadius)) ? Number(style.borderRadius) : undefined,
+      borderStyle: style.borderWidth === 0 ? "none" : "dashed",
+      borderWidth: Number.isFinite(Number(style.borderWidth)) ? Number(style.borderWidth) : undefined,
+      boxShadow: shadowValue,
+      minHeight: Number.isFinite(Number(style.minHeight)) ? Number(style.minHeight) : undefined,
+      padding: Number.isFinite(Number(style.padding)) ? Number(style.padding) : undefined,
+      textAlign: region?.textStyle?.textAlign || undefined,
+    };
+  }
+
+  function getVisualTemplateTextCssStyle(region: any): React.CSSProperties {
+    const textStyle = normalizeVisualTemplateStyle(region?.textStyle, visualTemplateStyleDefaults.textStyle);
+    return {
+      color: textStyle.color || undefined,
+      fontSize: Number.isFinite(Number(textStyle.fontSize)) ? Number(textStyle.fontSize) : undefined,
+      fontWeight: Number.isFinite(Number(textStyle.fontWeight)) ? Number(textStyle.fontWeight) : undefined,
+      textAlign: textStyle.textAlign || undefined,
+    };
+  }
+
+  function selectVisualTemplateRegion(event: React.MouseEvent<HTMLElement>, regionId: string) {
+    event.stopPropagation();
+    setVisualTemplateSelectedRegionId(regionId);
+    setActiveSidePanel("templateStyle");
+  }
+
+  function resetVisualTemplateRegion(regionId: string) {
+    setVisualTemplateModel((current) => ({
+      ...current,
+      regions: current.regions.map((region) => {
+        if (region.id !== regionId) return region;
+        const {
+          sourceFileId,
+          sourceKind,
+          sourceName,
+          sourcePath,
+          ...rest
+        } = region;
+        return rest;
+      }),
+    }));
+  }
+
+  function getVisualTemplateRegionSource(region, sources = getVisualTemplateSources()) {
+    return findVisualTemplateSourceForDrop({
+      id: region?.sourceFileId,
+      path: region?.sourcePath,
+    }, sources);
+  }
+
+  function getVisualTemplateBoundSources(sources = getVisualTemplateSources()) {
+    const sourceMap = new Map<string, any>();
+    visualTemplateModel.regions.forEach((region) => {
+      const source = getVisualTemplateRegionSource(region, sources);
+      if (source) {
+        sourceMap.set(source.id, source);
+      }
+    });
+    return [...sourceMap.values()];
+  }
+
+  function removeVisualTemplateSource(source) {
+    setVisualTemplateModel((current) => ({
+      ...current,
+      regions: current.regions.map((region) => {
+        const isRegionSource =
+          (source.id && region.sourceFileId === source.id) ||
+          visualTemplateSourceMatchesDrop(source, {
+            id: region.sourceFileId,
+            path: region.sourcePath,
+          });
+        if (!isRegionSource) return region;
+        const {
+          sourceFileId,
+          sourceKind,
+          sourceName,
+          sourcePath,
+          ...rest
+        } = region;
+        return rest;
+      }),
+    }));
+    setVisualTemplateSourceId((current) => (current === source.id ? null : current));
+  }
+
+  function getDroppedVisualTemplateSource(event: React.DragEvent<HTMLElement>) {
+    const projectNodeId = event.dataTransfer.getData("application/x-xml-editor-project-node");
+    if (projectNodeId) {
+      const match = findProjectNode(projectTree, projectNodeId);
+      if (match?.node?.type === "file") {
+        return {
+          id: match.node.id,
+          name: match.node.name,
+          path: getProjectFilePath(projectTree, match.node.id),
+          githubPath: match.node.githubPath || "",
+          kind: match.node.ditaType || "file",
+        };
+      }
+    }
+
+    const projectFileData = event.dataTransfer.getData("application/x-dita-project-file");
+    if (!projectFileData) return null;
+
+    try {
+      const parsedFile = JSON.parse(projectFileData);
+      if (parsedFile && (typeof parsedFile.path === "string" || typeof parsedFile.href === "string")) {
+        return parsedFile;
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  function canDropVisualTemplateSource(event: React.DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).some((type) => (
+      type === "application/x-xml-editor-project-node" || type === "application/x-dita-project-file"
+    ));
+  }
+
+  async function bindDroppedFileToVisualRegion(event: React.DragEvent<HTMLElement>, regionId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    setVisualTemplateDropRegionId(null);
+
+    const droppedSource = getDroppedVisualTemplateSource(event);
+    if (!droppedSource) return;
+
+    let sources = getVisualTemplateSources();
+    let source = findVisualTemplateSourceForDrop(droppedSource, sources);
+    const matchedNode = droppedSource.id ? findProjectNode(projectTree, droppedSource.id)?.node : null;
+    if (matchedNode?.type === "file" && (!source || (!fileHistories[matchedNode.id]?.present && !matchedNode.content && matchedNode.githubPath))) {
+      const loadedFile = await loadGitHubFileIfNeeded(matchedNode);
+      if (loadedFile) {
+        source = createVisualTemplateSourceFromFile(
+          loadedFile,
+          getProjectFilePath(projectTree, loadedFile.id) || loadedFile.githubPath || loadedFile.name,
+        );
+        sources = sources.filter((item) => item.id !== source.id).concat(source);
+      }
+    }
+
+    if (!source) {
+      appendTerminalMessage("Only DITA XML topics and maps can be bound to template binding containers for now.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    updateVisualTemplateRegion(regionId, {
+      sourceFileId: source.id,
+      sourcePath: source.path,
+      sourceName: source.name,
+      sourceKind: source.rootName,
+    });
+    setVisualTemplateSourceId(source.id);
+  }
+
+  function handleVisualTemplateDragOver(event: React.DragEvent<HTMLElement>, regionId: string) {
+    if (!canDropVisualTemplateSource(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setVisualTemplateDropRegionId(regionId);
+  }
+
+  function handleVisualTemplateDragLeave(event: React.DragEvent<HTMLElement>, regionId: string) {
+    if (visualTemplateDropRegionId !== regionId) return;
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+    setVisualTemplateDropRegionId(null);
+  }
+
+  function getVisualTemplateDraftPath() {
+    const activeTemplatePath = activeFileKind === "visual-template" && activeFile?.githubPath
+      ? activeFile.githubPath
+      : "";
+    const existingPath = visualTemplateModel.filePath || activeTemplatePath;
+    if (existingPath) return normalizeProjectPath(existingPath);
+
+    const slug = slugifySpecializationName(visualTemplateModel.name || "template-binding") || "template-binding";
+    return `visual_template_bindings/${slug}.af-binding.json`;
+  }
+
+  async function saveVisualTemplateDraft() {
+    const filePath = getVisualTemplateDraftPath();
+    const nextModel = normalizeVisualTemplateModel({
+      ...visualTemplateModel,
+      filePath,
+    });
+    const content = JSON.stringify(nextModel, null, 2);
+
+    setVisualTemplateModel(nextModel);
+    setFileHistories((current) => ({
+      ...current,
+      [activeFileKind === "visual-template" && activeFileId ? activeFileId : visualTemplatesTabId]: {
+        past: current[activeFileId]?.past || current[visualTemplatesTabId]?.past || [],
+        present: content,
+        future: [],
+      },
+    }));
+
+    if (!isAuthenticated) {
+      appendTerminalMessage("Sign in before saving template binding documents to the workspace.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+        method: "PUT",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath,
+          githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
+          sourceContentHash: activeFileKind === "visual-template" ? activeFile?.sourceContentHash || "" : "",
+          contentFormat: "visual-template-binding",
+          content,
+        }),
+      });
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not save template binding document.");
+      }
+
+      const savedFileName = filePath.split("/").pop() || "template-binding.af-binding.json";
+      const savedFileId = activeFileKind === "visual-template" && activeFileId
+        ? activeFileId
+        : `github-file-${filePath}`;
+      setFileHistories((current) => ({
+        ...current,
+        [savedFileId]: {
+          past: current[savedFileId]?.past || [],
+          present: content,
+          future: [],
+        },
+      }));
+      setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
+        id: savedFileId,
+        name: savedFileName,
+        ditaType: "visual-template-binding",
+        content,
+        githubPath: filePath,
+        githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
+        sourceContentHash: body.draft?.source_content_hash || activeFile?.sourceContentHash || "",
+        draftContentHash: body.draft?.draft_content_hash || "",
+        draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+        draftDirty: Boolean(body.draft?.dirty),
+      }));
+      appendTerminalMessage(`Saved template binding document to ${filePath}.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+    } catch (error) {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not save template binding document.", {
+        level: "error",
+        source: "Templates",
+        open: false,
+      });
+    }
+  }
+
+  function renderVisualTemplateStylePanel() {
+    const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
+    const regionStyle = normalizeVisualTemplateStyle(selectedRegion?.style, visualTemplateStyleDefaults.style);
+    const textStyle = normalizeVisualTemplateStyle(selectedRegion?.textStyle, visualTemplateStyleDefaults.textStyle);
+
+    const updateContainerStyle = (updates: Record<string, any>) => {
+      if (!selectedRegion) return;
+      updateVisualTemplateRegionStyle(selectedRegion.id, "style", updates);
+    };
+    const updateTextStyle = (updates: Record<string, any>) => {
+      if (!selectedRegion) return;
+      updateVisualTemplateRegionStyle(selectedRegion.id, "textStyle", updates);
+    };
+
+    return (
+      <aside
+        className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+        aria-label="Template style panel"
+        aria-hidden={activeSidePanel ? undefined : "true"}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <div className="panel-title">
+          <span>Style</span>
+          <div className="panel-title-actions">
+            {selectedRegion ? <strong>{selectedRegion.label}</strong> : <strong>None</strong>}
+            <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Style panel" onClick={() => setActiveSidePanel(null)}>
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+        {selectedRegion ? (
+          <div className="visual-template-side-content visual-style-panel">
+            <section className="visual-style-section">
+              <header>
+                <strong>Fill</strong>
+                <small>Container surface</small>
+              </header>
+              <label>
+                <span>Type</span>
+                <select
+                  value={String(regionStyle.fillMode || "solid")}
+                  onChange={(event) => updateContainerStyle({ fillMode: event.target.value })}
+                >
+                  <option value="solid">Solid</option>
+                  <option value="gradient">Gradient</option>
+                </select>
+              </label>
+              <label>
+                <span>Background</span>
+                <input
+                  type="color"
+                  value={regionStyle.backgroundColor || "#ffffff"}
+                  onChange={(event) => updateContainerStyle({ backgroundColor: event.target.value })}
+                />
+              </label>
+              {regionStyle.fillMode === "gradient" && (
+                <>
+                  <label>
+                    <span>From</span>
+                    <input
+                      type="color"
+                      value={regionStyle.gradientFrom || regionStyle.backgroundColor || "#ffffff"}
+                      onChange={(event) => updateContainerStyle({ gradientFrom: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>To</span>
+                    <input
+                      type="color"
+                      value={regionStyle.gradientTo || "#eef5ff"}
+                      onChange={(event) => updateContainerStyle({ gradientTo: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Angle</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="360"
+                      value={Number(regionStyle.gradientAngle ?? 135)}
+                      onChange={(event) => updateContainerStyle({ gradientAngle: Number(event.target.value) })}
+                    />
+                  </label>
+                </>
+              )}
+              <div className="visual-style-divider" />
+              <label>
+                <span>Image</span>
+                <select
+                  value={String(regionStyle.backgroundImageMode || "none")}
+                  onChange={(event) => updateContainerStyle({ backgroundImageMode: event.target.value })}
+                >
+                  <option value="none">None</option>
+                  <option value="image">Use image</option>
+                </select>
+              </label>
+              {regionStyle.backgroundImageMode === "image" && (
+                <>
+                  <label className="visual-style-wide-control">
+                    <span>Path or URL</span>
+                    <input
+                      type="text"
+                      placeholder="images/hero.png or https://..."
+                      value={String(regionStyle.backgroundImage || "")}
+                      onChange={(event) => updateContainerStyle({ backgroundImage: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Size</span>
+                    <select
+                      value={String(regionStyle.backgroundSize || "cover")}
+                      onChange={(event) => updateContainerStyle({ backgroundSize: event.target.value })}
+                    >
+                      <option value="cover">Cover</option>
+                      <option value="contain">Contain</option>
+                      <option value="auto">Actual size</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Position</span>
+                    <select
+                      value={String(regionStyle.backgroundPosition || "center")}
+                      onChange={(event) => updateContainerStyle({ backgroundPosition: event.target.value })}
+                    >
+                      <option value="center">Center</option>
+                      <option value="top">Top</option>
+                      <option value="bottom">Bottom</option>
+                      <option value="left">Left</option>
+                      <option value="right">Right</option>
+                      <option value="left top">Left top</option>
+                      <option value="right top">Right top</option>
+                      <option value="left bottom">Left bottom</option>
+                      <option value="right bottom">Right bottom</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Repeat</span>
+                    <select
+                      value={String(regionStyle.backgroundRepeat || "no-repeat")}
+                      onChange={(event) => updateContainerStyle({ backgroundRepeat: event.target.value })}
+                    >
+                      <option value="no-repeat">No repeat</option>
+                      <option value="repeat">Repeat</option>
+                      <option value="repeat-x">Repeat X</option>
+                      <option value="repeat-y">Repeat Y</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Overlay</span>
+                    <input
+                      type="color"
+                      value={regionStyle.backgroundOverlayColor || "#000000"}
+                      onChange={(event) => updateContainerStyle({ backgroundOverlayColor: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Overlay %</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="90"
+                      value={Number(regionStyle.backgroundOverlayOpacity ?? 0)}
+                      onChange={(event) => updateContainerStyle({ backgroundOverlayOpacity: Number(event.target.value) })}
+                    />
+                  </label>
+                </>
+              )}
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Border</strong>
+                <small>Outline and shape</small>
+              </header>
+              <label>
+                <span>Color</span>
+                <input
+                  type="color"
+                  value={regionStyle.borderColor || "#b9c9df"}
+                  onChange={(event) => updateContainerStyle({ borderColor: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Width</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="8"
+                  value={Number(regionStyle.borderWidth ?? 1)}
+                  onChange={(event) => updateContainerStyle({ borderWidth: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>Radius</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="48"
+                  value={Number(regionStyle.borderRadius ?? 8)}
+                  onChange={(event) => updateContainerStyle({ borderRadius: Number(event.target.value) })}
+                />
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Spacing</strong>
+                <small>Inside the container</small>
+              </header>
+              <label>
+                <span>Padding</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="80"
+                  value={Number(regionStyle.padding ?? 14)}
+                  onChange={(event) => updateContainerStyle({ padding: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>Min height</span>
+                <input
+                  type="number"
+                  min="40"
+                  max="600"
+                  value={Number(regionStyle.minHeight ?? 120)}
+                  onChange={(event) => updateContainerStyle({ minHeight: Number(event.target.value) })}
+                />
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Shadow</strong>
+                <small>Depth and emphasis</small>
+              </header>
+              <label>
+                <span>Preset</span>
+                <select
+                  value={String(regionStyle.shadowPreset || "none")}
+                  onChange={(event) => updateContainerStyle({ shadowPreset: event.target.value })}
+                >
+                  <option value="none">None</option>
+                  <option value="soft">Soft</option>
+                  <option value="lifted">Lifted</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              {regionStyle.shadowPreset !== "none" && (
+                <>
+                  <label>
+                    <span>Color</span>
+                    <input
+                      type="color"
+                      value={regionStyle.shadowColor || "#23406f"}
+                      onChange={(event) => updateContainerStyle({ shadowColor: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Opacity</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="60"
+                      value={Number(regionStyle.shadowOpacity ?? 12)}
+                      onChange={(event) => updateContainerStyle({ shadowOpacity: Number(event.target.value) })}
+                    />
+                  </label>
+                </>
+              )}
+              {regionStyle.shadowPreset === "custom" && (
+                <>
+                  <label>
+                    <span>X offset</span>
+                    <input
+                      type="number"
+                      min="-80"
+                      max="80"
+                      value={Number(regionStyle.shadowX ?? 0)}
+                      onChange={(event) => updateContainerStyle({ shadowX: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    <span>Y offset</span>
+                    <input
+                      type="number"
+                      min="-80"
+                      max="80"
+                      value={Number(regionStyle.shadowY ?? 12)}
+                      onChange={(event) => updateContainerStyle({ shadowY: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    <span>Blur</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="120"
+                      value={Number(regionStyle.shadowBlur ?? 24)}
+                      onChange={(event) => updateContainerStyle({ shadowBlur: Number(event.target.value) })}
+                    />
+                  </label>
+                </>
+              )}
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Text</strong>
+                <small>Typography for this slot</small>
+              </header>
+              <label>
+                <span>Color</span>
+                <input
+                  type="color"
+                  value={textStyle.color || "#172033"}
+                  onChange={(event) => updateTextStyle({ color: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Size</span>
+                <input
+                  type="number"
+                  min="8"
+                  max="80"
+                  value={Number(textStyle.fontSize ?? 13)}
+                  onChange={(event) => updateTextStyle({ fontSize: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>Weight</span>
+                <select
+                  value={String(textStyle.fontWeight ?? 500)}
+                  onChange={(event) => updateTextStyle({ fontWeight: Number(event.target.value) })}
+                >
+                  <option value="400">Regular</option>
+                  <option value="500">Medium</option>
+                  <option value="650">Semibold</option>
+                  <option value="750">Bold</option>
+                  <option value="850">Heavy</option>
+                </select>
+              </label>
+              <label>
+                <span>Align</span>
+                <select
+                  value={String(textStyle.textAlign || "left")}
+                  onChange={(event) => updateTextStyle({ textAlign: event.target.value })}
+                >
+                  <option value="left">Left</option>
+                  <option value="center">Center</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Animation</strong>
+                <small>Preview motion</small>
+              </header>
+              <label>
+                <span>Effect</span>
+                <select
+                  value={String(regionStyle.animationName || "none")}
+                  onChange={(event) => updateContainerStyle({ animationName: event.target.value })}
+                >
+                  <option value="none">None</option>
+                  <option value="fade-in">Fade in</option>
+                  <option value="slide-up">Slide up</option>
+                  <option value="scale-in">Scale in</option>
+                </select>
+              </label>
+              {regionStyle.animationName !== "none" && (
+                <>
+                  <label>
+                    <span>Duration</span>
+                    <input
+                      type="number"
+                      min="100"
+                      max="3000"
+                      step="50"
+                      value={Number(regionStyle.animationDuration ?? 600)}
+                      onChange={(event) => updateContainerStyle({ animationDuration: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    <span>Delay</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="3000"
+                      step="50"
+                      value={Number(regionStyle.animationDelay ?? 0)}
+                      onChange={(event) => updateContainerStyle({ animationDelay: Number(event.target.value) })}
+                    />
+                  </label>
+                </>
+              )}
+            </section>
+          </div>
+        ) : (
+          <div className="visual-template-empty-source">
+            <strong>Select a container or slot</strong>
+            <p>Click a visible area on the template canvas to edit its fill, border, spacing, and text style.</p>
+          </div>
+        )}
+      </aside>
+    );
+  }
+
+  function renderVisualTemplateWorkbench() {
+    const sources = getVisualTemplateSources();
+    const heroRegion = visualTemplateModel.regions.find((region) => region.id === "hero") || visualTemplateModel.regions[0];
+    const summaryRegion = visualTemplateModel.regions.find((region) => region.id === "summary") || visualTemplateModel.regions[1];
+    const bodyRegion = visualTemplateModel.regions.find((region) => region.id === "body") || visualTemplateModel.regions[2];
+    const sidebarRegion = visualTemplateModel.regions.find((region) => region.id === "sidebar") || visualTemplateModel.regions[3];
+    const getRegionSource = (region) => getVisualTemplateRegionSource(region, sources);
+    const heroSource = getRegionSource(heroRegion);
+    const summarySource = getRegionSource(summaryRegion);
+    const bodySource = getRegionSource(bodyRegion);
+    const sidebarSource = getRegionSource(sidebarRegion);
+    const titleValue = String(getVisualTemplateBindingValue(heroSource, heroRegion?.binding || "title") || "Topic title");
+    const summaryValue = String(getVisualTemplateBindingValue(summarySource, summaryRegion?.binding || "shortdesc") || "Short description slot");
+    const bodyValue = getVisualTemplateBindingValue(bodySource, bodyRegion?.binding || "bodyParagraphs");
+    const sidebarValue = getVisualTemplateBindingValue(sidebarSource, sidebarRegion?.binding || "topicrefs");
+    const bodyParagraphs = Array.isArray(bodyValue) && bodyValue.length ? bodyValue : [String(bodyValue || "Paragraph and section content will flow here.")];
+    const sidebarItems = Array.isArray(sidebarValue) ? sidebarValue : [];
+
+    return (
+      <div className="visual-template-tab">
+        <header className="visual-template-header">
+          <div>
+            <span>Template Binding Document</span>
+            <small>Template: {visualTemplateModel.template?.name || "No template selected"}</small>
+            <input
+              aria-label="Binding document name"
+              value={visualTemplateModel.name}
+              onChange={(event) => setVisualTemplateModel((current) => ({ ...current, name: event.target.value }))}
+            />
+          </div>
+          <button type="button" onClick={saveVisualTemplateDraft}>
+            Save binding document
+          </button>
+        </header>
+
+        <div className="visual-template-grid canvas-only">
+          <section className="visual-template-canvas" aria-label="Visual template canvas">
+            <div className="visual-page-preview" onClick={() => setVisualTemplateSelectedRegionId(null)}>
+              <section
+                className={`visual-hero-region visual-drop-region${visualTemplateDropRegionId === "hero" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "hero" ? " selected" : ""}`}
+                style={getVisualTemplateCssStyle(heroRegion)}
+                onClick={(event) => selectVisualTemplateRegion(event, "hero")}
+                onDragOver={(event) => handleVisualTemplateDragOver(event, "hero")}
+                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "hero")}
+                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "hero"); }}
+                title="Drop a DITA file from Explorer to bind this container."
+              >
+                <h2 style={getVisualTemplateTextCssStyle(heroRegion)}>{titleValue}</h2>
+                <p
+                  className={`visual-template-slot${visualTemplateSelectedRegionId === "summary" ? " selected" : ""}`}
+                  style={getVisualTemplateTextCssStyle(summaryRegion)}
+                  onClick={(event) => selectVisualTemplateRegion(event, "summary")}
+                >
+                  {summaryValue}
+                </p>
+              </section>
+              <section
+                className={`visual-content-region visual-drop-region${visualTemplateDropRegionId === "body" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "body" ? " selected" : ""}`}
+                style={getVisualTemplateCssStyle(bodyRegion)}
+                onClick={(event) => selectVisualTemplateRegion(event, "body")}
+                onDragOver={(event) => handleVisualTemplateDragOver(event, "body")}
+                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "body")}
+                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "body"); }}
+                title="Drop a DITA file from Explorer to bind this container."
+              >
+                {bodyParagraphs.map((paragraph, index) => (
+                  <p key={`${paragraph}-${index}`} style={getVisualTemplateTextCssStyle(bodyRegion)}>{paragraph}</p>
+                ))}
+              </section>
+              <aside
+                className={`visual-template-callout visual-drop-region${visualTemplateDropRegionId === "sidebar" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "sidebar" ? " selected" : ""}`}
+                style={getVisualTemplateCssStyle(sidebarRegion)}
+                onClick={(event) => selectVisualTemplateRegion(event, "sidebar")}
+                onDragOver={(event) => handleVisualTemplateDragOver(event, "sidebar")}
+                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "sidebar")}
+                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "sidebar"); }}
+                title="Drop a DITA file from Explorer to bind this container."
+              >
+                <strong style={getVisualTemplateTextCssStyle(sidebarRegion)}>{sidebarItems.length ? `${sidebarItems.length} items` : "Reusable component"}</strong>
+                {sidebarItems.slice(0, 4).map((item, index) => (
+                  <span key={`${item}-${index}`} style={getVisualTemplateTextCssStyle(sidebarRegion)}>{item}</span>
+                ))}
+              </aside>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   function renderSpecializationsWorkbench() {
     const selectedSpecialization = specializations.find((specialization) => specialization.id === selectedSpecializationId);
     const currentStatus = selectedSpecialization?.status || (selectedSpecializationId ? "draft" : "new");
@@ -9576,7 +13755,10 @@ function App() {
       setActiveAppMenuId(null);
       setAccountMenuOpen(false);
     }}>
-      <header className={`top-panel${activeIsXml && activeFile ? " editing" : " idle"}`}>
+      <header
+        className={`top-panel${activeIsXml && activeFile ? " editing" : " idle"}`}
+        onContextMenu={(event) => event.preventDefault()}
+      >
         <div className="top-panel-accent" />
         <div className="top-identity-row">
           <div className="product-lockup" aria-label="AuthFlow DITA Authoring Editor">
@@ -9716,8 +13898,11 @@ function App() {
         {activeIsXml && activeFile ? (
           <AuthoringRibbon
             active
+            activeTags={activeRibbonTags}
             allowedTags={ribbonAllowedTags}
+            tableContext={activeTableContext}
             onInsert={insertRibbonElement}
+            onTableCommand={runTableCommand}
           />
         ) : null}
       </header>
@@ -9818,7 +14003,7 @@ function App() {
                 sortMode="name"
               />
               {workspaceSource === "loading" && <p className="empty-state">Loading workspace...</p>}
-              {workspaceSource !== "loading" && projectTree.children.length === 0 && (
+              {workspaceSource !== "loading" && !hasVisibleProjectChildren(projectTree) && (
                 <p className="empty-state">No files found in this workspace.</p>
               )}
               {explorerMessage && <p className="explorer-message">{explorerMessage}</p>}
@@ -9955,7 +14140,7 @@ function App() {
                           <tbody>
                             {draftBackedFiles.map(({ node, path }) => {
                               const displayPath = path.replace(/^content\//, "");
-                              const changeState = node.githubSha ? "Updated" : "Added";
+                              const changeState = node.deletedAt ? "Deleted" : node.githubSha ? "Updated" : "Added";
                               return (
                                 <tr key={node.id}>
                                   <td className="git-change-check-cell">
@@ -9989,6 +14174,17 @@ function App() {
                                   </td>
                                   <td className="git-change-state-cell">
                                     <span className={`git-change-state ${changeState.toLowerCase()}`}>{changeState}</span>
+                                  </td>
+                                  <td className="git-change-action-cell">
+                                    <button
+                                      type="button"
+                                      className="git-change-discard-button"
+                                      title={`Discard changes for ${displayPath}`}
+                                      aria-label={`Discard changes for ${displayPath}`}
+                                      onClick={() => discardGitHubDraft(node)}
+                                    >
+                                      <GitDiscardIcon />
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -10111,6 +14307,7 @@ function App() {
             const paneFileId = pane.activeFileId || pane.tabs[0];
             const paneFile = findProjectNode(projectTree, paneFileId)?.node ||
               (paneFileId === specializationsTabId ? specializationsTabFile : null) ||
+              (paneFileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
               (paneFileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(paneFileId)) : null);
             const paneFileKind = getProjectFileKind(paneFile);
             const paneFilePath = getProjectFilePath(projectTree, paneFileId);
@@ -10160,6 +14357,7 @@ function App() {
               const tab = { fileId, paneId: pane.id };
               const tabFile = findProjectNode(projectTree, tab.fileId)?.node ||
                 (tab.fileId === specializationsTabId ? specializationsTabFile : null) ||
+                (tab.fileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
                 (tab.fileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(tab.fileId)) : null);
               if (!tabFile || tabFile.type !== "file") return null;
 
@@ -10170,8 +14368,10 @@ function App() {
               const dragOver = tabDropTarget?.paneId === pane.id &&
                 tabDropTarget?.fileId === tab.fileId &&
                 tabDropTarget?.placement === "tab";
-              const tabHistory = fileHistories[tab.fileId];
-              const dirty = Boolean(tabHistory && tabHistory.present !== tabFile.content);
+              const draftDotState = active && activeFile?.id === tab.fileId && activeFile?.githubPath &&
+                ["pending", "saving", "error"].includes(draftSaveState.status)
+                ? draftSaveState.status
+                : "";
 
               return (
                 <button
@@ -10236,8 +14436,14 @@ function App() {
                   }}
                   title={tabFile.name}
                 >
+                  {draftDotState && (
+                    <small
+                      aria-label={draftDotState === "pending" ? "Draft changes pending" : draftDotState === "saving" ? "Saving draft" : "Draft save error"}
+                      className={`tab-draft-dot ${draftDotState}`}
+                      title={draftSaveState.message}
+                    />
+                  )}
                   <span>{tabFile.name}</span>
-                  {dirty && <small aria-label="Unsaved changes">•</small>}
                   <em
                     aria-label={`Close ${tabFile.name}`}
                     role="button"
@@ -10249,7 +14455,7 @@ function App() {
                       }
                     }}
                   >
-                    x
+                    ×
                   </em>
                 </button>
               );
@@ -10262,16 +14468,22 @@ function App() {
             </div>
           ) : pane.id === activePaneId && paneFileKind === "xml" ? (
             <>
-          <div className="modebar" role="tablist" aria-label="Editor mode">
-            <button className={mode === "visual" ? "active" : ""} onClick={() => setMode("visual")}>
-              <EditorModeIcon mode="visual" />
-              <span>WYSIWYG</span>
-            </button>
-            <button className={mode === "layout" ? "active" : ""} onClick={() => setMode("layout")}>
+          <div className="modebar" role="toolbar" aria-label="Editor view toggles">
+            <button
+              aria-pressed={mode === "layout"}
+              className={mode === "layout" ? "active" : ""}
+              onClick={() => setMode((current) => current === "layout" ? "visual" : "layout")}
+              title={mode === "layout" ? "Return to WYSIWYG" : "Show layout structure"}
+            >
               <EditorModeIcon mode="layout" />
               <span>Layout</span>
             </button>
-            <button className={mode === "source" ? "active" : ""} onClick={() => setMode("source")}>
+            <button
+              aria-pressed={mode === "source"}
+              className={mode === "source" ? "active" : ""}
+              onClick={() => setMode((current) => current === "source" ? "visual" : "source")}
+              title={mode === "source" ? "Return to WYSIWYG" : "Show XML source"}
+            >
               <EditorModeIcon mode="source" />
               <span>Source</span>
             </button>
@@ -10284,12 +14496,38 @@ function App() {
               <EditorModeIcon mode="validate" />
               <span>{toolbarValidation.status === "validating" ? "Validating..." : "Validate"}</span>
             </button>
-            {activeFile?.githubPath && (
-              <span className={`draft-save-indicator ${draftSaveState.status}`} title={draftSaveState.message}>
-                {draftSaveState.status === "saving" ? "Saving draft..." : draftSaveState.status === "saved" ? "Draft saved" : draftSaveState.status === "error" ? "Draft error" : "Draft ready"}
-              </span>
-            )}
           </div>
+
+          {parsed.doc && (
+            <nav className="element-breadcrumb" aria-label="Selected element hierarchy">
+              {getElementBreadcrumbItems(parsed.doc, selectedPath).map((item, index, items) => {
+                const isCurrent = index === items.length - 1;
+                return (
+                  <React.Fragment key={pathKeyFor(item.path) || "root"}>
+                    <button
+                      type="button"
+                      className={isCurrent ? "current" : ""}
+                      aria-current={isCurrent ? "true" : undefined}
+                      onClick={() => {
+                        setSelectedPath(item.path);
+                        setDocumentHighlightPathKey(pathKeyFor(item.path));
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedPath(item.path);
+                        setDocumentHighlightPathKey(pathKeyFor(item.path));
+                        openContextMenu(event, item.path);
+                      }}
+                    >
+                      {item.tagName}
+                    </button>
+                    {index < items.length - 1 && <span aria-hidden="true">&gt;</span>}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
+          )}
 
           {activeAiSuggestion && (
             <section className={`ai-review-banner ${activeAiSuggestion.severity}`} aria-label="AI review suggestion">
@@ -10319,9 +14557,24 @@ function App() {
           <div className={`editor-stage ${mode}`}>
             {(mode === "visual" || mode === "layout" || mode === "split") && (
               <section className="visual-workbench">
+                <div className="spelling-overlay" aria-hidden="true">
+                  {spellingMarks.map((mark) => (
+                    <span
+                      className="spelling-overlay-mark"
+                      key={mark.id}
+                      style={{
+                        left: mark.left,
+                        top: mark.top,
+                        width: mark.width,
+                      }}
+                    />
+                  ))}
+                </div>
                 <article
                   className={`visual-editor${mode === "layout" ? " layout-editor" : ""}`}
                   aria-label="WYSIWYG DITA editor"
+                  spellCheck={false}
+                  onKeyDownCapture={handleAuthoringShortcutKeyDown}
                   onPointerDownCapture={preserveContextSelectionFromPointer}
                 >
                   {parsed.doc ? (
@@ -10342,6 +14595,9 @@ function App() {
                       hrefValidationMap={hrefValidationMap}
                       pinnedSelection={pinnedAuthoringSelection}
                       visualSearchQuery={activeSidePanel === "search" ? searchQuery : ""}
+                      spellingIssues={activeSpellingIssues}
+                      inlineExitCaret={inlineExitCaret}
+                      onInlineExitTextInput={commitInlineExitText}
 	                      onOpenContextMenu={openContextMenu}
 	                    />
                   ) : (
@@ -10401,6 +14657,8 @@ function App() {
             </>
           ) : pane.id === activePaneId && paneFileKind === "specializations" ? (
             renderSpecializationsWorkbench()
+          ) : pane.id === activePaneId && paneFileKind === "visual-template" ? (
+            renderVisualTemplateWorkbench()
           ) : pane.id === activePaneId && paneFileKind === "authoring-profile" ? (
             renderAuthoringProfileWorkbench(getAuthoringProfileDocumentTypeFromTabId(paneFileId))
           ) : pane.id === activePaneId && paneFileKind === "image" ? (
@@ -10437,7 +14695,7 @@ function App() {
               onMouseDown={() => switchToTab(paneFileId, pane.id)}
             >
               {paneFileKind === "xml" && paneParsed.doc ? (
-                <article className="visual-editor" aria-label={`${pane.label} pane preview`}>
+                <article className="visual-editor" aria-label={`${pane.label} pane preview`} spellCheck={false}>
                   <VisualNode
                     node={paneParsed.doc.documentElement}
                     path={[]}
@@ -10462,6 +14720,9 @@ function App() {
                     hrefValidationMap={paneHrefValidationMap}
                     pinnedSelection={null}
                     visualSearchQuery={activeSidePanel === "search" ? searchQuery : ""}
+                    spellingIssues={[]}
+                    inlineExitCaret={null}
+                    onInlineExitTextInput={() => {}}
                     onOpenContextMenu={(event, path) => {
                       event.preventDefault();
                       activatePaneSelection(pane.id, paneFileId, path);
@@ -10694,17 +14955,16 @@ function App() {
           aria-hidden={activeSidePanel ? undefined : "true"}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <div className="panel-title">
-            <span>Inspector</span>
-            <div className="panel-title-actions">
-              <strong>{activeFileKind === "xml" ? selectedNode?.tagName || "None" : activeFileKind}</strong>
-              <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Inspector panel" onClick={() => setActiveSidePanel(null)}>
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-
           {activeFileKind !== "xml" ? (
+            <>
+            <div className="inspector-topbar">
+              <span>Inspector</span>
+              <div className="inspector-topbar-actions">
+                <button type="button" className="inspector-close-button" title="Close panel" aria-label="Close Inspector panel" onClick={() => setActiveSidePanel(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
             <div className="generic-inspector">
               <p className="empty-state">
                 {activeFileKind === "image"
@@ -10722,96 +14982,37 @@ function App() {
                 </div>
               )}
             </div>
+            </>
           ) : selectedNode ? (
-            <div className="inspector-sections">
-              <section className="inspector-section attributes-section">
-                <header>
-                  <div>
-                    <h3>Attributes</h3>
-                    <p>Allowed on &lt;{selectedNode.tagName}&gt;</p>
-                  </div>
-                  <strong>{getAttributeDefinitions(selectedNode.tagName).length}</strong>
-                </header>
-                <div className="inspector-section-body">
-                  <AttributeEditor
-                    node={selectedNode}
-                    attributeDefinitions={getAttributeDefinitions(selectedNode.tagName)}
-                    validationByName={hrefValidationMap[pathKeyFor(selectedPath)]
-                      ? { href: hrefValidationMap[pathKeyFor(selectedPath)] }
-                      : {}}
-                    onChange={(name, value) => updateAttribute(selectedPath, name, value)}
-                    onBlur={(name, value) => {
-                      if (name === "href") {
-                        validateHrefAttribute(selectedPath, value);
-                      }
-                    }}
-                  />
-                </div>
-                <footer>
-                  <button className="danger compact-danger" disabled={selectedPath.length === 0} onClick={removeSelected}>
-                    Remove selected
-                  </button>
-                </footer>
-              </section>
-
-              <section className="inspector-section">
-                <header>
-                  <div>
-                    <h3>Insert Into</h3>
-                    <p>Children allowed inside &lt;{selectedNode.tagName}&gt;</p>
-                  </div>
-                  <strong>{insertContext.childOptions.length}</strong>
-                </header>
-                <div className="inspector-section-body">
-                  {insertContext.childOptions.length ? (
-                    <div className="schema-option-list">
-                      {insertContext.childOptions.map((tagName) => (
-                        <button
-                          key={tagName}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => insertElement(tagName, "child")}
-                        >
-                          <span>{tagName}</span>
-                          <small>{getElementDefinition(tagName)?.inline ? "Inline" : "Block"}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="section-empty">No child elements are allowed here.</p>
-                  )}
-                </div>
-              </section>
-
-              <section className="inspector-section">
-                <header>
-                  <div>
-                    <h3>Insert After</h3>
-                    <p>Siblings allowed after &lt;{selectedNode.tagName}&gt;</p>
-                  </div>
-                  <strong>{insertContext.siblingOptions.length}</strong>
-                </header>
-                <div className="inspector-section-body">
-                  {insertContext.siblingOptions.length ? (
-                    <div className="schema-option-list">
-                      {insertContext.siblingOptions.map((tagName) => (
-                        <button
-                          key={tagName}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => insertElement(tagName, "after")}
-                        >
-                          <span>{tagName}</span>
-                          <small>{getElementDefinition(tagName)?.inline ? "Inline" : "Block"}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="section-empty">No following sibling elements are allowed here.</p>
-                  )}
-                </div>
-              </section>
-            </div>
+            <InspectorPanel
+              doc={parsed.doc}
+              selectedNode={selectedNode}
+              selectedPath={selectedPath}
+              childOptions={insertContext.childOptions}
+              siblingOptions={insertContext.siblingOptions}
+              hrefValidation={hrefValidationMap[pathKeyFor(selectedPath)]}
+              onClose={() => setActiveSidePanel(null)}
+              onInsert={insertElement}
+              onRemove={removeSelected}
+              onUpdateAttribute={(name, value) => updateAttribute(selectedPath, name, value)}
+              onAttributeBlur={(name, value) => {
+                if (name === "href") {
+                  validateHrefAttribute(selectedPath, value);
+                }
+              }}
+            />
           ) : (
+            <>
+            <div className="inspector-topbar">
+              <span>Inspector</span>
+              <div className="inspector-topbar-actions">
+                <button type="button" className="inspector-close-button" title="Close panel" aria-label="Close Inspector panel" onClick={() => setActiveSidePanel(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
             <p className="empty-state">Select an element to edit attributes or insert DITA children.</p>
+            </>
           )}
         </aside>
         )}
@@ -11416,7 +15617,194 @@ function App() {
           </aside>
         )}
 
+        {renderedSidePanel === "templateSources" && (
+          <aside
+            className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+            aria-label="Dropped files panel"
+            aria-hidden={activeSidePanel ? undefined : "true"}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <div className="panel-title">
+              <span>Dropped Files</span>
+              <div className="panel-title-actions">
+                <strong>{getVisualTemplateBoundSources().length}</strong>
+                <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Dropped Files panel" onClick={() => setActiveSidePanel(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="visual-template-side-content">
+              {getVisualTemplateBoundSources().length ? (
+                getVisualTemplateBoundSources().map((source) => (
+                  <div
+                    className={`visual-template-source-card${visualTemplateSourceId === source.id ? " active" : ""}`}
+                    key={source.id}
+                  >
+                    <button
+                      type="button"
+                      className="visual-template-source-main"
+                      onClick={() => setVisualTemplateSourceId(source.id)}
+                    >
+                      <span>{source.rootName}</span>
+                      <strong>{source.name}</strong>
+                      {source.title && source.title !== source.name ? <em>{source.title}</em> : null}
+                      <small>{source.path}</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="visual-template-source-remove"
+                      title={`Remove ${source.title} from binding sources`}
+                      aria-label={`Remove ${source.title} from binding sources`}
+                      onClick={() => removeVisualTemplateSource(source)}
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="visual-template-empty-source">
+                  <strong>No dropped files</strong>
+                  <p>Drag DITA topics or maps from Explorer onto a binding container to add sources here.</p>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+
+        {renderedSidePanel === "templateBindings" && (
+          <aside
+            className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+            aria-label="Template bindings panel"
+            aria-hidden={activeSidePanel ? undefined : "true"}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <div className="panel-title">
+              <span>Container Slots</span>
+              <div className="panel-title-actions">
+                <strong>{visualTemplateModel.regions.length}</strong>
+                <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Bindings panel" onClick={() => setActiveSidePanel(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="visual-template-side-content">
+              {visualTemplateModel.regions.map((region) => {
+                const sources = getVisualTemplateSources();
+                const regionSource = getVisualTemplateRegionSource(region, sources);
+                const droppedSources = getVisualTemplateBoundSources(sources);
+                const bindingOptions = getVisualTemplateBindingOptions(regionSource);
+                const bindingPreview = getVisualTemplateBindingPreview(regionSource, region.binding);
+                return (
+                  <div className="visual-binding-row editable" key={region.id}>
+                    <header>
+                      <div>
+                        <strong>{region.label} container</strong>
+                        <small>{region.role} layout · {region.binding} slot</small>
+                      </div>
+                      {regionSource ? (
+                        <button
+                          className="visual-binding-reset"
+                          type="button"
+                          onClick={() => resetVisualTemplateRegion(region.id)}
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                    </header>
+                    <label>
+                      <span>Source</span>
+                      <select
+                        value={regionSource?.id || ""}
+                        onChange={(event) => setVisualTemplateRegionSource(region.id, event.target.value)}
+                      >
+                        <option value="">Drop a source file</option>
+                        {droppedSources.map((source) => (
+                          <option value={source.id} key={source.id}>
+                            {getVisualTemplateSourceLabel(source)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Binding</span>
+                      <select
+                        value={region.binding}
+                        onChange={(event) => updateVisualTemplateRegion(region.id, { binding: event.target.value })}
+                      >
+                        {bindingOptions.map((option) => (
+                          <option value={option.value} key={option.value}>
+                            {option.label}{option.hasValue === false ? " (empty)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="visual-binding-preview">
+                      <span>Preview</span>
+                      <p>{bindingPreview}</p>
+                    </div>
+                    <code>
+                      {regionSource ? `${regionSource.path}#${region.binding}` : "No source bound"}
+                    </code>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+
+        {renderedSidePanel === "templateStyle" && renderVisualTemplateStylePanel()}
+
         <nav className="side-dock" aria-label="Right side panels" onContextMenu={(event) => event.preventDefault()}>
+          {activeIsVisualTemplate ? (
+            <>
+              <button
+                className={activeSidePanel === "templateSources" ? "active" : ""}
+                type="button"
+                title="Dropped Files"
+                data-tooltip="Dropped Files"
+                aria-label="Toggle Dropped Files panel"
+                aria-pressed={activeSidePanel === "templateSources"}
+                onClick={() => setActiveSidePanel((current) => current === "templateSources" ? null : "templateSources")}
+              >
+                <TemplateSourcesIcon />
+              </button>
+              <button
+                className={activeSidePanel === "templateBindings" ? "active" : ""}
+                type="button"
+                title="Bindings"
+                data-tooltip="Bindings"
+                aria-label="Toggle Bindings panel"
+                aria-pressed={activeSidePanel === "templateBindings"}
+                onClick={() => setActiveSidePanel((current) => current === "templateBindings" ? null : "templateBindings")}
+              >
+                <TemplateBindingsIcon />
+              </button>
+              <button
+                className={activeSidePanel === "templateStyle" ? "active" : ""}
+                type="button"
+                title="Style"
+                data-tooltip="Style"
+                aria-label="Toggle Style panel"
+                aria-pressed={activeSidePanel === "templateStyle"}
+                onClick={() => setActiveSidePanel((current) => current === "templateStyle" ? null : "templateStyle")}
+              >
+                <TemplateStyleIcon />
+              </button>
+              <button
+                className={activeSidePanel === "notifications" ? "active" : ""}
+                type="button"
+                title="Notifications"
+                data-tooltip="Notifications"
+                aria-label="Toggle Notifications panel"
+                aria-pressed={activeSidePanel === "notifications"}
+                onClick={() => setActiveSidePanel((current) => current === "notifications" ? null : "notifications")}
+              >
+                <NotificationIcon />
+                {unreadNotificationCount > 0 && <span className="dock-badge">{Math.min(99, unreadNotificationCount)}</span>}
+              </button>
+            </>
+          ) : (
+            <>
           <button
             className={activeSidePanel === "inspector" ? "active" : ""}
             type="button"
@@ -11513,6 +15901,8 @@ function App() {
           >
             <HelpIcon />
           </button>
+            </>
+          )}
         </nav>
       </section>
       {contextMenu && (
@@ -11529,6 +15919,13 @@ function App() {
             setContextMenu(null);
             contextSelectionRangeRef.current = null;
             setPinnedAuthoringSelection(null);
+          }}
+          onSpellingReplace={replaceSpellingIssue}
+          onSpellingIgnore={ignoreSpellingIssue}
+          onSpellingAddToDictionary={addSpellingIssueToDictionary}
+          onTableCommand={(command) => {
+            runTableCommand(command, contextMenu.path);
+            setContextMenu(null);
           }}
           onAiAction={(action) => {
             caretRef.current = contextMenu.authoringSelection;
@@ -11657,6 +16054,29 @@ function App() {
           projectTree={projectTree}
           fileHistories={fileHistories}
           onClose={() => setProjectPropertiesNodeId(null)}
+        />
+      )}
+      {visualTemplatePickerMode && (
+        <VisualTemplatePickerDialog
+          mode={visualTemplatePickerMode}
+          templates={getVisualTemplateCatalog()}
+          onSelect={(template) => {
+            startTemplateBindingFromTemplate(template);
+            setVisualTemplatePickerMode(null);
+          }}
+          onClose={() => setVisualTemplatePickerMode(null)}
+        />
+      )}
+      {visualTemplateUploadOpen && (
+        <VisualTemplateUploadDialog
+          onUpload={(file) => { void uploadVisualTemplateFile(file); }}
+          onClose={() => setVisualTemplateUploadOpen(false)}
+        />
+      )}
+      {visualTemplateImportOpen && (
+        <VisualTemplateImportDialog
+          onImport={startImportedVisualTemplate}
+          onClose={() => setVisualTemplateImportOpen(false)}
         />
       )}
       {toastNotifications.length > 0 && (
@@ -11900,6 +16320,133 @@ function FileTypePicker({ picker, fileTypes, onSelect }) {
           <span>{fileType.label || getDocumentTypeLabel(fileType.key)}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
+  const title = mode === "create" ? "Create New Template" : "Open Existing Template";
+
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header>
+          <div>
+            <span>Template Library</span>
+            <strong>{title}</strong>
+          </div>
+          <button type="button" aria-label="Close template picker" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <p>
+          Choose a visual template first. The editor will then create a template-binding document where you bind DITA files to its containers and slots.
+        </p>
+        <div className="template-picker-list">
+          {templates.map((template) => (
+            <button type="button" key={template.id} onClick={() => onSelect(template)}>
+              <span>{template.source}</span>
+              <strong>{template.name}</strong>
+              <small>{template.description}</small>
+              <em>{template.regions?.length || 0} containers</em>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function VisualTemplateUploadDialog({ onUpload, onClose }) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Upload Template"
+        onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header>
+          <div>
+            <span>Template Library</span>
+            <strong>Upload Template</strong>
+          </div>
+          <button type="button" aria-label="Close upload template" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <p>
+          Upload an existing template JSON file. The editor will create a new template-binding document from that template.
+        </p>
+        <label className="template-upload-dropzone">
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+          />
+          <strong>{selectedFile?.name || "Choose template JSON"}</strong>
+          <span>{selectedFile ? "Ready to upload" : "Supported now: AuthFlow template JSON"}</span>
+        </label>
+        <div className="template-dialog-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" className="primary" disabled={!selectedFile} onClick={() => selectedFile && onUpload(selectedFile)}>
+            Upload Template
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function VisualTemplateImportDialog({ onImport, onClose }) {
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Import Template"
+        onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header>
+          <div>
+            <span>Template Library</span>
+            <strong>Import Template</strong>
+          </div>
+          <button type="button" aria-label="Close import template" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <p>
+          Import from design tools and convert frames or components into template containers and slots.
+        </p>
+        <div className="template-picker-list">
+          <button type="button" onClick={() => onImport("canva")}>
+            <span>Canva</span>
+            <strong>Import from Canva</strong>
+            <small>Prepare a Canva template connection and map visual areas to DITA-driven slots.</small>
+            <em>provider</em>
+          </button>
+          <button type="button" onClick={() => onImport("figma")}>
+            <span>Figma</span>
+            <strong>Import from Figma</strong>
+            <small>Prepare a Figma template connection and map frames/components to containers and slots.</small>
+            <em>provider</em>
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -12159,6 +16706,17 @@ function GitChangesIcon() {
   );
 }
 
+function GitDiscardIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M9 7.2H5.8V4" />
+      <path d="M5.9 7.2A7.2 7.2 0 1 1 4.8 14" />
+      <path d="M9.2 9.2 14.8 14.8" />
+      <path d="m14.8 9.2-5.6 5.6" />
+    </svg>
+  );
+}
+
 function FilePlusIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" className="file-plus-glyph">
@@ -12316,91 +16874,20 @@ function SchemaIcon() {
   );
 }
 
-type RibbonCommand = {
-  tag: string;
-  label: string;
-  icon?: string;
-  emphasis?: boolean;
-};
-
-type RibbonGroup = {
-  id: string;
-  label: string;
-  commands: RibbonCommand[];
-};
-
-const authoringRibbonGroups: RibbonGroup[] = [
-  {
-    id: "text",
-    label: "Text",
-    commands: [
-      { tag: "b", label: "B", icon: "bold", emphasis: true },
-      { tag: "i", label: "I", icon: "italic" },
-      { tag: "u", label: "U", icon: "underline" },
-      { tag: "sup", label: "x²", icon: "sup" },
-      { tag: "sub", label: "x₂", icon: "sub" },
-      { tag: "codeph", label: "code", icon: "code" },
-    ],
-  },
-  {
-    id: "headings",
-    label: "Headings",
-    commands: [
-      { tag: "title", label: "title" },
-      { tag: "section", label: "section" },
-      { tag: "shortdesc", label: "shortdesc" },
-    ],
-  },
-  {
-    id: "lists",
-    label: "Lists",
-    commands: [
-      { tag: "ul", label: "ul", icon: "bullet-list" },
-      { tag: "ol", label: "ol", icon: "number-list" },
-      { tag: "li", label: "li" },
-    ],
-  },
-  {
-    id: "dita-elements",
-    label: "DITA Elements",
-    commands: [
-      { tag: "p", label: "p" },
-      { tag: "note", label: "note" },
-      { tag: "section", label: "section" },
-      { tag: "codeblock", label: "codeblock" },
-      { tag: "fig", label: "fig" },
-      { tag: "image", label: "image", icon: "image" },
-    ],
-  },
-  {
-    id: "references",
-    label: "References",
-    commands: [
-      { tag: "xref", label: "xref", icon: "link", emphasis: true },
-      { tag: "topicref", label: "topicref", icon: "link" },
-      { tag: "image", label: "image", icon: "image" },
-    ],
-  },
-  {
-    id: "insert",
-    label: "Insert",
-    commands: [
-      { tag: "table", label: "table", icon: "table" },
-      { tag: "simpletable", label: "simpletable", icon: "table" },
-      { tag: "dl", label: "dl" },
-      { tag: "pre", label: "pre", icon: "screen" },
-    ],
-  },
-];
-
 function AuthoringRibbon({
   active,
+  activeTags,
   allowedTags,
+  tableContext,
   onInsert,
+  onTableCommand,
 }: {
   active: boolean;
+  activeTags: Set<string>;
   allowedTags: Set<string>;
+  tableContext: TableContext | null;
   onInsert: (tagName: string) => void;
+  onTableCommand: (command: TableCommand) => void;
 }) {
   const visibleGroups = authoringRibbonGroups
     .map((group) => ({
@@ -12421,15 +16908,18 @@ function AuthoringRibbon({
             <article className="ribbon-card" key={group.id} aria-label={group.label}>
               <div className="ribbon-card-actions">
                 {group.commands.map((command) => {
-                  const enabled = allowedTags.has(command.tag);
+                  const activeCommand = activeTags.has(command.tag);
+                  const enabled = activeCommand || allowedTags.has(command.tag);
+                  const commandLabel = activeCommand ? `Remove <${command.tag}>` : `Insert <${command.tag}>`;
 
                   return (
                     <button
-                      className={command.emphasis ? "emphasis" : ""}
+                      aria-pressed={activeCommand}
+                      className={`${command.emphasis ? "emphasis" : ""}${activeCommand ? " active" : ""}`.trim()}
                       disabled={!enabled}
                       key={`${group.id}-${command.tag}`}
                       type="button"
-                      title={enabled ? `Insert <${command.tag}>` : `<${command.tag}> is not valid here`}
+                      title={enabled ? commandLabel : `<${command.tag}> is not valid here`}
                       onClick={() => {
                         if (enabled) {
                           onInsert(command.tag);
@@ -12445,6 +16935,64 @@ function AuthoringRibbon({
               <div className="ribbon-card-label">{group.label}</div>
             </article>
           ))
+        ) : null}
+        {tableContext ? (
+          <article className="ribbon-card table-ribbon-card" aria-label={`${tableContext.label} table tools`}>
+            <div className="ribbon-card-actions">
+              <button
+                type="button"
+                title="Insert row above"
+                onClick={() => onTableCommand("insert-row-before")}
+              >
+                <RibbonCommandIcon icon="row-before" label="Row before" />
+                <span>Row Before</span>
+              </button>
+              <button
+                type="button"
+                title="Insert row below"
+                onClick={() => onTableCommand("insert-row-after")}
+              >
+                <RibbonCommandIcon icon="row-after" label="Row after" />
+                <span>Row After</span>
+              </button>
+              <button
+                disabled={!tableContext.canEditColumns}
+                type="button"
+                title={tableContext.canEditColumns ? "Insert column before" : "This table type has fixed columns"}
+                onClick={() => onTableCommand("insert-column-before")}
+              >
+                <RibbonCommandIcon icon="column-before" label="Column before" />
+                <span>Col Before</span>
+              </button>
+              <button
+                disabled={!tableContext.canEditColumns}
+                type="button"
+                title={tableContext.canEditColumns ? "Insert column after" : "This table type has fixed columns"}
+                onClick={() => onTableCommand("insert-column-after")}
+              >
+                <RibbonCommandIcon icon="column-after" label="Column after" />
+                <span>Col After</span>
+              </button>
+              <button
+                type="button"
+                title="Delete row"
+                onClick={() => onTableCommand("delete-row")}
+              >
+                <RibbonCommandIcon icon="delete-row" label="Delete row" />
+                <span>Delete Row</span>
+              </button>
+              <button
+                disabled={!tableContext.canEditColumns}
+                type="button"
+                title={tableContext.canEditColumns ? "Delete column" : "This table type has fixed columns"}
+                onClick={() => onTableCommand("delete-column")}
+              >
+                <RibbonCommandIcon icon="delete-column" label="Delete column" />
+                <span>Delete Col</span>
+              </button>
+            </div>
+            <div className="ribbon-card-label">Table Layout</div>
+          </article>
         ) : null}
         <button className="ribbon-customize" type="button" title="Customize toolbar">
           <RibbonCommandIcon icon="customize" label="" />
@@ -12512,6 +17060,53 @@ function RibbonCommandIcon({ icon, label }: { icon?: string; label: string }) {
         <path d="M4 10h16" />
         <path d="M9 5v14" />
         <path d="M15 5v14" />
+      </svg>
+    );
+  }
+
+  if (
+    icon === "row-before" ||
+    icon === "row-after" ||
+    icon === "column-before" ||
+    icon === "column-after" ||
+    icon === "delete-row" ||
+    icon === "delete-column"
+  ) {
+    const isRow = icon.includes("row");
+    const isDelete = icon.startsWith("delete");
+    const isBefore = icon.endsWith("before");
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="5" y="5" width="14" height="14" rx="2" />
+        <path d="M5 11h14" />
+        <path d="M5 16h14" />
+        <path d="M11 5v14" />
+        <path d="M16 5v14" />
+        {isDelete ? (
+          isRow ? (
+            <>
+              <path d="M7 13.5h10" />
+              <path d="m10 10.5 4 6" />
+              <path d="m14 10.5-4 6" />
+            </>
+          ) : (
+            <>
+              <path d="M13.5 7v10" />
+              <path d="m10.5 10 6 4" />
+              <path d="m10.5 14 6-4" />
+            </>
+          )
+        ) : isRow ? (
+          <>
+            <path d={isBefore ? "M7 3h10" : "M7 21h10"} />
+            <path d={isBefore ? "m12 2 0 4" : "m12 18 0 4"} />
+          </>
+        ) : (
+          <>
+            <path d={isBefore ? "M3 7v10" : "M21 7v10"} />
+            <path d={isBefore ? "m2 12 4 0" : "m18 12 4 0"} />
+          </>
+        )}
       </svg>
     );
   }
@@ -12695,6 +17290,41 @@ function HelpIcon() {
   );
 }
 
+function TemplateSourcesIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H11l2 2h3.5A2.5 2.5 0 0 1 19 7.5v9A2.5 2.5 0 0 1 16.5 19h-9A2.5 2.5 0 0 1 5 16.5z" />
+      <path d="M8 10h8" />
+      <path d="M8 13h6" />
+      <path d="M8 16h4" />
+    </svg>
+  );
+}
+
+function TemplateBindingsIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M7 7.5h4.5v4.5H7z" />
+      <path d="M12.5 12h4.5v4.5h-4.5z" />
+      <path d="M11.5 9.8h2.8" />
+      <path d="M9.2 12v2.2h3.3" />
+      <path d="M5 4.5h14v15H5z" />
+    </svg>
+  );
+}
+
+function TemplateStyleIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4.5 18.5h15" />
+      <path d="M7 15.5 14.5 8l1.5 1.5L8.5 17H7z" />
+      <path d="M13.5 6.5 15 5l4 4-1.5 1.5" />
+      <path d="M5.5 5.5h5" />
+      <path d="M5.5 8.5h3" />
+    </svg>
+  );
+}
+
 function NewChatIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -12752,6 +17382,289 @@ function SendIcon() {
       <path d="M4 12 20 4l-5 16-3-7z" />
       <path d="m12 13 8-9" />
     </svg>
+  );
+}
+
+function InspectorPanel({
+  doc,
+  selectedNode,
+  selectedPath,
+  childOptions,
+  siblingOptions,
+  hrefValidation,
+  onClose,
+  onInsert,
+  onRemove,
+  onUpdateAttribute,
+  onAttributeBlur,
+}) {
+  const [expandedSection, setExpandedSection] = useState("insert-into");
+  const [attributeFilter, setAttributeFilter] = useState("");
+  const [insertIntoFilter, setInsertIntoFilter] = useState("");
+  const [insertAfterFilter, setInsertAfterFilter] = useState("");
+  const [insertIntoKind, setInsertIntoKind] = useState("all");
+  const [insertAfterKind, setInsertAfterKind] = useState("all");
+  const attributeDefinitions = getAttributeDefinitions(selectedNode.tagName);
+  const validationByName = hrefValidation ? { href: hrefValidation } : {};
+  const toggleSection = (sectionId: string) => {
+    setExpandedSection((current) => current === sectionId ? "" : sectionId);
+  };
+
+  return (
+    <>
+      <div className="inspector-topbar">
+        <span>Inspector</span>
+        <div className="inspector-topbar-actions">
+          <strong>&lt;{selectedNode.tagName}&gt;</strong>
+          <button type="button" className="inspector-close-button" title="Close panel" aria-label="Close Inspector panel" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+      </div>
+
+      <div className="inspector-accordion" aria-label={`Inspector for ${selectedNode.tagName}`}>
+        <InspectorAccordionSection
+          id="attributes"
+          title="Attributes"
+          subtitle={`Allowed on <${selectedNode.tagName}>`}
+          count={attributeDefinitions.length}
+          expanded={expandedSection === "attributes"}
+          onToggle={() => toggleSection("attributes")}
+        >
+          <InspectorAttributeTable
+            doc={doc}
+            node={selectedNode}
+            selectedPath={selectedPath}
+            attributeDefinitions={attributeDefinitions}
+            filter={attributeFilter}
+            validationByName={validationByName}
+            onFilterChange={setAttributeFilter}
+            onChange={onUpdateAttribute}
+            onBlur={onAttributeBlur}
+          />
+        </InspectorAccordionSection>
+
+        <InspectorAccordionSection
+          id="insert-into"
+          title="Insert Into"
+          subtitle={`Children allowed inside <${selectedNode.tagName}>`}
+          count={childOptions.length}
+          expanded={expandedSection === "insert-into"}
+          onToggle={() => toggleSection("insert-into")}
+        >
+          <InspectorElementList
+            filter={insertIntoFilter}
+            kind={insertIntoKind}
+            options={childOptions}
+            onFilterChange={setInsertIntoFilter}
+            onKindChange={setInsertIntoKind}
+            onInsert={(tagName) => onInsert(tagName, "child")}
+            emptyText="No child elements are allowed here."
+          />
+        </InspectorAccordionSection>
+
+        <InspectorAccordionSection
+          id="insert-after"
+          title="Insert After"
+          subtitle={`Siblings allowed after <${selectedNode.tagName}>`}
+          count={siblingOptions.length}
+          expanded={expandedSection === "insert-after"}
+          onToggle={() => toggleSection("insert-after")}
+        >
+          <InspectorElementList
+            filter={insertAfterFilter}
+            kind={insertAfterKind}
+            options={siblingOptions}
+            onFilterChange={setInsertAfterFilter}
+            onKindChange={setInsertAfterKind}
+            onInsert={(tagName) => onInsert(tagName, "after")}
+            emptyText="No following sibling elements are allowed here."
+          />
+        </InspectorAccordionSection>
+      </div>
+
+      <div className="inspector-remove-bar">
+        <button className="inspector-remove-button" disabled={selectedPath.length === 0} onClick={onRemove}>
+          Remove selected
+        </button>
+      </div>
+    </>
+  );
+}
+
+function InspectorAccordionSection({ id, title, subtitle, count, expanded, onToggle, children }) {
+  return (
+    <section className={`inspector-accordion-section${expanded ? " expanded" : ""}`} aria-labelledby={`${id}-heading`}>
+      <button
+        type="button"
+        className="inspector-section-toggle"
+        id={`${id}-heading`}
+        aria-expanded={expanded}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onToggle}
+      >
+        <span className="inspector-section-chevron" aria-hidden="true">›</span>
+        <span className="inspector-section-copy">
+          <strong>{title}</strong>
+          <span>{subtitle}</span>
+        </span>
+        <span className="inspector-section-count">{count}</span>
+      </button>
+      {expanded && (
+        <div className="inspector-expanded-body">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InspectorElementList({ options, filter, kind, onFilterChange, onKindChange, onInsert, emptyText }) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filteredOptions = options.filter((tagName) => {
+    const definition = getElementDefinition(tagName);
+    const isInline = Boolean(definition?.inline);
+    if (kind === "inline" && !isInline) return false;
+    if (kind === "block" && isInline) return false;
+    return !normalizedFilter || tagName.toLowerCase().includes(normalizedFilter);
+  });
+
+  return (
+    <div className="inspector-expanded-content">
+      <div className="inspector-filter-row">
+        <label className="inspector-filter-field">
+          <SearchIcon />
+          <input
+            value={filter}
+            onChange={(event) => onFilterChange(event.target.value)}
+            placeholder="Filter elements..."
+          />
+        </label>
+        <button
+          type="button"
+          className={kind === "block" ? "active" : ""}
+          onClick={() => onKindChange(kind === "block" ? "all" : "block")}
+        >
+          BLK
+        </button>
+        <button
+          type="button"
+          className={kind === "inline" ? "active" : ""}
+          onClick={() => onKindChange(kind === "inline" ? "all" : "inline")}
+        >
+          INL
+        </button>
+      </div>
+
+      {filteredOptions.length ? (
+        <div className="inspector-element-list">
+          {filteredOptions.map((tagName) => {
+            const isInline = Boolean(getElementDefinition(tagName)?.inline);
+            return (
+              <button
+                key={tagName}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onInsert(tagName)}
+              >
+                <span>{tagName}</span>
+                <small className={isInline ? "inline" : ""}>{isInline ? "Inline" : "Block"}</small>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="section-empty">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function InspectorAttributeTable({
+  doc,
+  node,
+  selectedPath,
+  attributeDefinitions,
+  filter,
+  validationByName = {},
+  onFilterChange,
+  onChange,
+  onBlur,
+}) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filteredAttributes = attributeDefinitions.filter((attribute) => {
+    const label = attribute.label || attribute.name;
+    return !normalizedFilter || label.toLowerCase().includes(normalizedFilter) || attribute.name.toLowerCase().includes(normalizedFilter);
+  });
+
+  return (
+    <div className="inspector-expanded-content">
+      <div className="inspector-attribute-filter">
+        <label className="inspector-filter-field">
+          <SearchIcon />
+          <input
+            value={filter}
+            onChange={(event) => onFilterChange(event.target.value)}
+            placeholder="Filter attributes..."
+          />
+        </label>
+      </div>
+
+      {filteredAttributes.length ? (
+        <div className="inspector-attribute-table" role="table" aria-label={`Attributes for ${node.tagName}`}>
+          {filteredAttributes.map((attribute) => {
+            const value = node.getAttribute(attribute.name) || "";
+            const optionValues = getContextualAttributeValues(doc, selectedPath, attribute.name) || attribute.values || [];
+            return (
+              <label className="inspector-attribute-row" key={attribute.name} role="row">
+                <span className="inspector-attribute-name" role="cell">{attribute.label || attribute.name}</span>
+                <span className="inspector-attribute-value" role="cell">
+                  {optionValues.length ? (
+                    <select
+                      value={value}
+                      onChange={(event) => onChange(attribute.name, event.target.value)}
+                    >
+                      <option value="">-</option>
+                      {optionValues.map((optionValue) => (
+                        <option key={optionValue} value={optionValue}>
+                          {optionValue}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="input-shell">
+                      <input
+                        className={validationByName[attribute.name] ? `has-validation ${validationByName[attribute.name].status}` : ""}
+                        value={value}
+                        onChange={(event) => onChange(attribute.name, event.target.value)}
+                        onBlur={(event) => onBlur?.(attribute.name, event.target.value)}
+                        placeholder={attribute.placeholder || "-"}
+                        aria-invalid={validationByName[attribute.name]?.status === "invalid" ? "true" : undefined}
+                        aria-describedby={validationByName[attribute.name] ? `${attribute.name}-validation` : undefined}
+                      />
+                      {validationByName[attribute.name] && (
+                        <span
+                          className={`validation-marker ${validationByName[attribute.name].status}`}
+                          id={`${attribute.name}-validation`}
+                          role="status"
+                          tabIndex={0}
+                          aria-label={validationByName[attribute.name].message}
+                        >
+                          {validationByName[attribute.name].status === "valid" ? "✓" : "x"}
+                          <span className="validation-tooltip">{validationByName[attribute.name].message}</span>
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="section-empty">No matching attributes.</p>
+      )}
+    </div>
   );
 }
 
@@ -13584,12 +18497,23 @@ function ImageViewer({ file }) {
   );
 }
 
-function SchemaContextMenu({ contextMenu, onClose, onInsert, onAiAction }) {
+function SchemaContextMenu({
+  contextMenu,
+  onClose,
+  onInsert,
+  onSpellingReplace,
+  onSpellingIgnore,
+  onSpellingAddToDictionary,
+  onAiAction,
+  onTableCommand,
+}) {
   const { insertContext } = contextMenu;
+  const spellingIssue = contextMenu.spellingIssue as SpellingIssue | null | undefined;
+  const tableOptions = contextMenu.tableOptions || [];
   const hasTextSelection = contextMenu.authoringSelection?.kind === "range";
   const addIntoOptions = hasTextSelection
     ? []
-    : insertContext.childOptions.filter((tagName) => isInlineInsertionElement(tagName));
+    : insertContext.childOptions;
   const addAfterOptions = insertContext.siblingOptions;
   const surroundOptions = hasTextSelection ? insertContext.surroundOptions : [];
   const aiOptions = [
@@ -13631,6 +18555,7 @@ function SchemaContextMenu({ contextMenu, onClose, onInsert, onAiAction }) {
     addIntoOptions.length,
     addAfterOptions.length,
     surroundOptions.length,
+    tableOptions.length,
   ]);
 
   useEffect(() => {
@@ -13668,8 +18593,47 @@ function SchemaContextMenu({ contextMenu, onClose, onInsert, onAiAction }) {
     >
       <div className="context-menu-header">
         <span>{insertContext.selectedNode?.tagName || "none"}</span>
-        <small>{insertContext.label}</small>
       </div>
+      {spellingIssue && (
+        <section className="context-menu-section spelling-context-section">
+          <h3>Spelling</h3>
+          <div className="spelling-context-word">
+            <span>{spellingIssue.word}</span>
+            <small>{spellingIssue.language}</small>
+          </div>
+          <div className="context-menu-actions">
+            {spellingIssue.suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                role="menuitem"
+                type="button"
+                onClick={() => onSpellingReplace(spellingIssue, suggestion)}
+              >
+                <span className="schema-context-menu-label">
+                  <span className="schema-context-menu-icon" aria-hidden="true">
+                    <SchemaContextMenuIcon type="spelling" />
+                  </span>
+                  <span>{suggestion}</span>
+                </span>
+              </button>
+            ))}
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => onSpellingIgnore(spellingIssue)}
+            >
+              Ignore
+            </button>
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => onSpellingAddToDictionary(spellingIssue)}
+            >
+              Add to dictionary
+            </button>
+          </div>
+        </section>
+      )}
       <ContextMenuSubmenu
         title="AI"
         icon="ai"
@@ -13691,7 +18655,7 @@ function SchemaContextMenu({ contextMenu, onClose, onInsert, onAiAction }) {
           title="Add Into"
           icon="addInto"
           options={addIntoOptions.map((tagName) => ({ id: tagName, label: tagName, icon: "element" }))}
-          emptyText="No inline elements are allowed inside this element."
+          emptyText="No child elements are allowed inside this element."
           onSelect={(option) => onInsert(option.id, "child")}
         />
       )}
@@ -13702,6 +18666,15 @@ function SchemaContextMenu({ contextMenu, onClose, onInsert, onAiAction }) {
         emptyText="No following sibling elements are allowed here."
         onSelect={(option) => onInsert(option.id, "after")}
       />
+      {tableOptions.length > 0 && (
+        <ContextMenuSubmenu
+          title="Table"
+          icon="table"
+          options={tableOptions}
+          emptyText="No table operations are available."
+          onSelect={(option) => onTableCommand(option.id)}
+        />
+      )}
     </div>
   );
 }
@@ -13755,6 +18728,7 @@ function ContextMenuSubmenu({ title, icon, options, emptyText, onSelect }) {
               disabled={option.disabled}
               key={option.id}
               role="menuitem"
+              title={option.title || ""}
               type="button"
               onClick={() => onSelect(option)}
             >
@@ -13775,6 +18749,15 @@ function ContextMenuSubmenu({ title, icon, options, emptyText, onSelect }) {
 }
 
 function SchemaContextMenuIcon({ type }) {
+  if (type === "spelling") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <path d="m5 13 4 4L19 7" />
+        <path d="M4 20h16" />
+      </svg>
+    );
+  }
+
   if (type === "ai") {
     return (
       <svg viewBox="0 0 24 24">
@@ -13875,6 +18858,74 @@ function SchemaContextMenuIcon({ type }) {
         <path d="M8 5H5v14h3" />
         <path d="M16 5h3v14h-3" />
         <path d="M10 12h4" />
+      </svg>
+    );
+  }
+
+  if (type === "table") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="4" y="5" width="16" height="14" rx="1" />
+        <path d="M4 10h16" />
+        <path d="M4 15h16" />
+        <path d="M10 5v14" />
+        <path d="M16 5v14" />
+      </svg>
+    );
+  }
+
+  if (type === "table-row-before" || type === "table-row-after") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="5" y="7" width="14" height="10" rx="1" />
+        <path d="M5 12h14" />
+        <path d={type === "table-row-before" ? "M12 3v4" : "M12 17v4"} />
+        <path d={type === "table-row-before" ? "M9 5h6" : "M9 19h6"} />
+      </svg>
+    );
+  }
+
+  if (type === "table-column-before" || type === "table-column-after") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="7" y="5" width="10" height="14" rx="1" />
+        <path d="M12 5v14" />
+        <path d={type === "table-column-before" ? "M3 12h4" : "M17 12h4"} />
+        <path d={type === "table-column-before" ? "M5 9v6" : "M19 9v6"} />
+      </svg>
+    );
+  }
+
+  if (type === "table-delete-row" || type === "table-delete-column") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="5" y="5" width="14" height="14" rx="1" />
+        {type === "table-delete-row" ? <path d="M5 12h14" /> : <path d="M12 5v14" />}
+        <path d="m8 8 8 8" />
+        <path d="m16 8-8 8" />
+      </svg>
+    );
+  }
+
+  if (type === "table-merge-right" || type === "table-merge-left") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="5" y="5" width="14" height="14" rx="1" />
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+        {type === "table-merge-right" ? <path d="m10 12 4-4v8l-4-4Z" /> : <path d="m14 12-4-4v8l4-4Z" />}
+      </svg>
+    );
+  }
+
+  if (type === "table-split-cells") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <rect x="5" y="5" width="14" height="14" rx="1" />
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+        <path d="m9 9-2 2 2 2" />
+        <path d="m15 9 2 2-2 2" />
       </svg>
     );
   }
@@ -13987,7 +19038,10 @@ function ProjectTreeNode({
   const matched = projectNodeMatchesQuery(node, query, projectPath);
   const dropPlacement = dropTarget?.nodeId === node.id ? dropTarget.placement : null;
   const isSearchActive = Boolean(query.trim());
-  const canExpand = node.type === "folder" && node.children.length > 0;
+  const visibleChildren = node.type === "folder"
+    ? getSortedProjectChildren(node.children.filter((child) => !child.deletedAt), sortMode)
+    : [];
+  const canExpand = node.type === "folder" && visibleChildren.length > 0;
   const iconKind = node.type === "folder" ? "folder" : getProjectFileIconKind(node);
   const [expanded, setExpanded] = useState(node.id === "root" || depth < 2);
   const showChildren = canExpand && (expanded || isSearchActive);
@@ -13998,7 +19052,7 @@ function ProjectTreeNode({
     }
   }, [canExpand, node, selectedProjectId]);
 
-  if (!visible) return null;
+  if ((node.deletedAt && node.id !== "root") || !visible) return null;
 
   function getDropPlacement(event) {
     if (node.type === "folder") {
@@ -14021,14 +19075,16 @@ function ProjectTreeNode({
         onDragStart={(event) => {
           if (node.id === "root") return;
 
-          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.effectAllowed = node.type === "file" ? "copyMove" : "move";
           event.dataTransfer.setData("application/x-xml-editor-project-node", node.id);
           if (node.type === "file") {
             event.dataTransfer.setData("text/plain", dragHref);
             event.dataTransfer.setData("application/x-dita-project-file", JSON.stringify({
+              id: node.id,
               href: dragHref,
               name: node.name,
               path: projectPath,
+              githubPath: node.githubPath || "",
               previewHref: node.previewHref || "",
               kind: node.ditaType || "file",
             }));
@@ -14089,7 +19145,7 @@ function ProjectTreeNode({
       </button>
       {showChildren && (
         <div className="project-children">
-          {getSortedProjectChildren(node.children, sortMode).map((child) => (
+          {visibleChildren.map((child) => (
             <ProjectTreeNode
               key={child.id}
               node={child}
@@ -14118,6 +19174,10 @@ function ProjectTreeNode({
 
 function TreeNode({ node, path, selectedPath, hrefValidationMap, onSelect }) {
   const selected = path.join(".") === selectedPath.join(".");
+  if (isVisualMetadataElement(node.tagName)) {
+    return null;
+  }
+
   const children = elementChildren(node);
   const hrefValidationState = hrefValidationMap[pathKeyFor(path)];
   const hasBrokenHref = hrefValidationState?.status === "invalid";
@@ -14167,16 +19227,27 @@ function VisualNode({
   hrefValidationMap,
   pinnedSelection,
   visualSearchQuery,
+  spellingIssues = [],
+  inlineExitCaret,
+  onInlineExitTextInput,
   onOpenContextMenu,
 }) {
   const highlighted = pathKeyFor(path) === highlightedPathKey;
+  const selected = pathKeyFor(path) === pathKeyFor(selectedPath);
   const tagName = node.tagName;
+  if (isVisualMetadataElement(tagName)) {
+    return null;
+  }
+
   const children = elementChildren(node);
+  const text = node.textContent || "";
   const hasElementChildren = children.length > 0;
   const isHrefDropTarget = tagName === "image" || tagName === "xref" || tagName === "topicref";
+  const rendersInline = isInlineRenderingElement(tagName) && tagName !== "image";
+  const rendersBodyBlock = nodeSpecializesFrom(node, "body");
   const [isHrefDragOver, setIsHrefDragOver] = useState(false);
   const hrefValidationState = hrefValidationMap[pathKeyFor(path)];
-  const className = `dita-node dita-${tagName}${highlighted ? " selected" : ""}${hrefValidationState?.status === "invalid" ? " href-invalid" : ""}${hrefValidationState?.status === "valid" ? " href-valid" : ""}${isHrefDropTarget && isHrefDragOver ? " drop-active" : ""}`;
+  const className = `dita-node dita-${tagName}${rendersInline ? " inline-node" : ""}${rendersBodyBlock ? " body-node" : ""}${highlighted || selected ? " selected" : ""}${hrefValidationState?.status === "invalid" ? " href-invalid" : ""}${hrefValidationState?.status === "valid" ? " href-valid" : ""}${isHrefDropTarget && isHrefDragOver ? " drop-active" : ""}`;
   const placeholder = getEditorPlaceholderForNode(node);
 
   function select(event) {
@@ -14186,19 +19257,24 @@ function VisualNode({
   }
 
   function handleEditableEnterKeyDown(event, textNodeIndex = null) {
-    if (!["li", "p"].includes(tagName) || event.key !== "Enter" || event.shiftKey) return;
+    if (event.key !== "Enter" || event.shiftKey) return;
 
-    event.preventDefault();
-    event.stopPropagation();
+    if (!["li", "cmd", "p"].includes(tagName)) return;
 
     const authoringSelection = getAuthoringSelection();
-    const currentText = event.currentTarget.textContent || "";
+    const currentText = stripEditableCaretSeed(event.currentTarget.textContent || "");
 
-    if (tagName === "li") {
-      onListItemEnter(path, currentText, textNodeIndex, authoringSelection);
+    if (tagName === "li" || tagName === "cmd") {
+      const handled = onListItemEnter(path, currentText, textNodeIndex, authoringSelection);
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
       return;
     }
 
+    event.preventDefault();
+    event.stopPropagation();
     onParagraphEnter(path, currentText, textNodeIndex, authoringSelection);
   }
 
@@ -14236,6 +19312,61 @@ function VisualNode({
     });
   }
 
+  function handleEditableMouseDown(event: React.MouseEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
+  function handleEditableClick(event: React.MouseEvent<HTMLElement>) {
+    event.stopPropagation();
+    onCaretChange(getAuthoringSelection());
+  }
+
+  function handleEditableMouseUp(event: React.MouseEvent<HTMLElement>) {
+    event.stopPropagation();
+    onCaretChange(getAuthoringSelection());
+  }
+
+  function handleEditableFocus(event: React.FocusEvent<HTMLElement>) {
+    event.stopPropagation();
+    window.requestAnimationFrame(() => onCaretChange(getAuthoringSelection()));
+  }
+
+  function normalizeEditableBlur(target: HTMLElement) {
+    const nextText = stripEditableCaretSeed(target.textContent || "");
+    const hasText = Boolean(nextText.trim());
+
+    target.classList.toggle("has-live-text", hasText);
+    target.classList.toggle("editable-empty", !hasText);
+
+    if (!hasText) {
+      target.textContent = "";
+    }
+
+    return nextText;
+  }
+
+  function normalizeEditableInputTarget(target: HTMLElement, stripCaretSeed = false) {
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const shouldRestoreCaret = Boolean(range?.collapsed && target.contains(range.startContainer));
+    const caretOffset = range && shouldRestoreCaret ? getRangeTextOffsetWithin(target, range) : null;
+    const rawText = target.textContent || "";
+    const nextText = stripCaretSeed ? stripEditableCaretSeed(rawText) : rawText;
+    const shouldFlattenDom = target.childNodes.length !== 1 || target.firstChild?.nodeType !== Node.TEXT_NODE;
+
+    if (shouldFlattenDom || rawText !== nextText) {
+      target.textContent = nextText;
+      if (shouldRestoreCaret && caretOffset !== null) {
+        setCaretByTextOffset(target, Math.min(caretOffset, nextText.length));
+      }
+    }
+
+    const hasText = Boolean(nextText.trim());
+    target.classList.toggle("has-live-text", hasText);
+    target.classList.toggle("editable-empty", !hasText);
+    return nextText;
+  }
+
   function getDroppedProjectFile(event: React.DragEvent<HTMLElement>) {
     const projectFileData = event.dataTransfer.getData("application/x-dita-project-file");
     if (projectFileData) {
@@ -14268,6 +19399,79 @@ function VisualNode({
     setIsHrefDragOver(true);
   }
 
+  function renderChildNodes(childNodes = children) {
+    return childNodes.map((child, index) => (
+      <VisualNode
+        key={`${child.tagName}-${index}`}
+        node={child}
+        path={[...path, index]}
+        selectedPath={selectedPath}
+        highlightedPathKey={highlightedPathKey}
+        onSelect={onSelect}
+        onTextChange={onTextChange}
+        onTextNodeChange={onTextNodeChange}
+        onTextInput={onTextInput}
+        onCaretChange={onCaretChange}
+        onListItemEnter={onListItemEnter}
+        onParagraphEnter={onParagraphEnter}
+        onHrefDrop={onHrefDrop}
+        resolveImageHref={resolveImageHref}
+        hrefValidationMap={hrefValidationMap}
+        pinnedSelection={pinnedSelection}
+        visualSearchQuery={visualSearchQuery}
+        spellingIssues={spellingIssues}
+        inlineExitCaret={inlineExitCaret}
+        onInlineExitTextInput={onInlineExitTextInput}
+        onOpenContextMenu={onOpenContextMenu}
+      />
+    ));
+  }
+
+  function renderCalsGridCells() {
+    const grid = resolveCalsGrid(node);
+    if (!grid.valid) return null;
+
+    return grid.rows.flatMap((rowGrid) => rowGrid.cells.map((cell) => {
+      const relativePath = getRelativePathForElement(node, cell.entry);
+      if (!relativePath) return null;
+
+      const cellPath = [...path, ...relativePath];
+      return (
+        <div
+          className="dita-cals-cell-shell"
+          key={cellPath.join(".")}
+          style={{
+            gridColumn: `${cell.startCol + 1} / ${cell.endCol + 2}`,
+            gridRow: `${cell.rowIndex + 1} / ${cell.endRow + 2}`,
+          }}
+        >
+          <VisualNode
+            node={cell.entry}
+            path={cellPath}
+            selectedPath={selectedPath}
+            highlightedPathKey={highlightedPathKey}
+            onSelect={onSelect}
+            onTextChange={onTextChange}
+            onTextNodeChange={onTextNodeChange}
+            onTextInput={onTextInput}
+            onCaretChange={onCaretChange}
+            onListItemEnter={onListItemEnter}
+            onParagraphEnter={onParagraphEnter}
+            onHrefDrop={onHrefDrop}
+            resolveImageHref={resolveImageHref}
+            hrefValidationMap={hrefValidationMap}
+            pinnedSelection={pinnedSelection}
+            visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
+            onOpenContextMenu={onOpenContextMenu}
+          />
+        </div>
+      );
+    }));
+  }
+
   if (tagName === "topic" || tagName === "map") {
     return (
       <div
@@ -14297,6 +19501,9 @@ function VisualNode({
             hrefValidationMap={hrefValidationMap}
             pinnedSelection={pinnedSelection}
             visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
             onOpenContextMenu={onOpenContextMenu}
           />
         ))}
@@ -14333,6 +19540,9 @@ function VisualNode({
             hrefValidationMap={hrefValidationMap}
             pinnedSelection={pinnedSelection}
             visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
             onOpenContextMenu={onOpenContextMenu}
           />
         ))}
@@ -14369,6 +19579,9 @@ function VisualNode({
             hrefValidationMap={hrefValidationMap}
             pinnedSelection={pinnedSelection}
             visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
             onOpenContextMenu={onOpenContextMenu}
           />
         ))}
@@ -14405,10 +19618,99 @@ function VisualNode({
             hrefValidationMap={hrefValidationMap}
             pinnedSelection={pinnedSelection}
             visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
             onOpenContextMenu={onOpenContextMenu}
           />
         ))}
       </figure>
+    );
+  }
+
+  if (isTableContainerElement(tagName)) {
+    const containerModel = getTableModelForTable(tagName);
+    const tableClass = containerModel ? ` table-model-${containerModel}` : "";
+    const calsGrid = tagName === "tgroup" ? resolveCalsGrid(node) : null;
+
+    return (
+      <div
+        className={`${className} dita-table-grid${tableClass}${calsGrid?.valid ? " cals-resolved-grid" : ""}`}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        style={calsGrid?.valid
+          ? { "--dita-column-count": String(Math.max(1, calsGrid.columnCount)) } as React.CSSProperties
+          : undefined}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        tabIndex={0}
+      >
+        {calsGrid?.valid ? renderCalsGridCells() : renderChildNodes()}
+      </div>
+    );
+  }
+
+  if (isTableRowElement(tagName)) {
+    const rowModel = getTableModelForRow(tagName) || "simple";
+    const cells = getRowCells(node, rowModel);
+
+    return (
+      <div
+        className={`${className} dita-table-row table-model-${rowModel}`}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        style={{ "--dita-column-count": String(Math.max(1, cells.length)) } as React.CSSProperties}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        tabIndex={0}
+      >
+        {renderChildNodes()}
+      </div>
+    );
+  }
+
+  if (isTableCellElement(tagName)) {
+    return (
+      <div
+        className={`${className} dita-table-cell`}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        tabIndex={0}
+      >
+        {hasElementChildren ? renderChildNodes() : (
+          <span
+            className={`dita-text-run${text.trim() ? " has-live-text" : " editable-empty"}`}
+            contentEditable
+            data-dita-tag={tagName}
+            data-editing-element={tagName}
+            data-node-path={path.join(".")}
+            data-text-node-index={0}
+            data-placeholder={placeholder}
+            suppressContentEditableWarning
+            spellCheck={false}
+            onMouseDown={handleEditableMouseDown}
+            onClick={handleEditableClick}
+            onContextMenu={(event) => onOpenContextMenu(event, path)}
+            onKeyDown={(event) => handleEditableEnterKeyDown(event)}
+            onInput={(event) => {
+              const nextText = normalizeEditableInputTarget(event.currentTarget, true);
+              onTextInput(path, nextText, null);
+            }}
+            onPaste={handlePlainTextPaste}
+            onDoubleClick={handleEditableDoubleClick}
+            onFocus={handleEditableFocus}
+            onKeyUp={() => {
+              onCaretChange(getAuthoringSelection());
+            }}
+            onMouseUp={handleEditableMouseUp}
+            onBlur={(event) => onTextChange(path, normalizeEditableBlur(event.currentTarget))}
+          >
+            {text}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -14442,10 +19744,52 @@ function VisualNode({
             hrefValidationMap={hrefValidationMap}
             pinnedSelection={pinnedSelection}
             visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
             onOpenContextMenu={onOpenContextMenu}
           />
         ))}
       </ListTag>
+    );
+  }
+
+  if (tagName === "steps") {
+    return (
+      <ol
+        className={className}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        tabIndex={0}
+      >
+        {children.map((child, index) => (
+          <VisualNode
+            key={`${child.tagName}-${index}`}
+            node={child}
+            path={[...path, index]}
+            selectedPath={selectedPath}
+            highlightedPathKey={highlightedPathKey}
+            onSelect={onSelect}
+            onTextChange={onTextChange}
+            onTextNodeChange={onTextNodeChange}
+            onTextInput={onTextInput}
+            onCaretChange={onCaretChange}
+            onListItemEnter={onListItemEnter}
+            onParagraphEnter={onParagraphEnter}
+            onHrefDrop={onHrefDrop}
+            resolveImageHref={resolveImageHref}
+            hrefValidationMap={hrefValidationMap}
+            pinnedSelection={pinnedSelection}
+            visualSearchQuery={visualSearchQuery}
+            spellingIssues={spellingIssues}
+            inlineExitCaret={inlineExitCaret}
+            onInlineExitTextInput={onInlineExitTextInput}
+            onOpenContextMenu={onOpenContextMenu}
+          />
+        ))}
+      </ol>
     );
   }
 
@@ -14494,6 +19838,9 @@ function VisualNode({
                 hrefValidationMap={hrefValidationMap}
                 pinnedSelection={pinnedSelection}
                 visualSearchQuery={visualSearchQuery}
+                spellingIssues={spellingIssues}
+                inlineExitCaret={inlineExitCaret}
+                onInlineExitTextInput={onInlineExitTextInput}
                 onOpenContextMenu={onOpenContextMenu}
               />
             ))}
@@ -14504,13 +19851,7 @@ function VisualNode({
   }
 
   if (hasElementChildren) {
-    const MixedTag =
-      tagName === "p" ? "p"
-      : tagName === "li" ? "li"
-      : tagName === "b" ? "strong"
-      : tagName === "i" ? "em"
-      : tagName === "u" || tagName === "xref" || tagName === "ph" ? "span"
-      : "div";
+    const MixedTag = getVisualTagForElement(tagName) as any;
     let elementIndex = 0;
 
     return (
@@ -14530,8 +19871,9 @@ function VisualNode({
           if (child.nodeType === Node.TEXT_NODE) {
             return (
               <span
-                className="dita-text-run"
+                className={`dita-text-run${(child.textContent || "").trim() ? " has-live-text" : ""}`}
                 contentEditable
+                spellCheck={false}
                 data-node-path={path.join(".")}
                 data-text-node-index={childNodeIndex}
                 data-placeholder={placeholder}
@@ -14541,69 +19883,97 @@ function VisualNode({
                   onCaretChange(getAuthoringSelection());
                 }}
                 onKeyDown={(event) => handleEditableEnterKeyDown(event, childNodeIndex)}
-                onInput={(event) => onTextInput(path, event.currentTarget.textContent || "", childNodeIndex)}
+                onInput={(event) => {
+                  const nextText = normalizeEditableInputTarget(event.currentTarget);
+                  onTextInput(path, nextText, childNodeIndex);
+                }}
                 onPaste={handlePlainTextPaste}
                 onDoubleClick={handleEditableDoubleClick}
-                onMouseUp={() => {
-                  onCaretChange(getAuthoringSelection());
-                }}
+                onMouseDown={handleEditableMouseDown}
+                onClick={handleEditableClick}
+                onMouseUp={handleEditableMouseUp}
+                onFocus={handleEditableFocus}
                 onBlur={(event) =>
-                  onTextNodeChange(path, childNodeIndex, event.currentTarget.textContent)
+                  onTextNodeChange(path, childNodeIndex, normalizeEditableBlur(event.currentTarget))
                 }
               >
-                {renderTextWithVisualHighlights(child.textContent || "", pinnedSelection, path, childNodeIndex, visualSearchQuery)}
+                {renderTextWithVisualHighlights(
+                  child.textContent || "",
+                  pinnedSelection,
+                  path,
+                  childNodeIndex,
+                  visualSearchQuery,
+                  spellingIssues,
+                )}
               </span>
             );
           }
 
-          const childPath = [...path, elementIndex];
+          const childElementIndex = elementIndex;
+          const childPath = [...path, childElementIndex];
           elementIndex += 1;
           const elementChild = child as Element;
+          const showInlineExitCaret =
+            inlineExitCaret &&
+            pathKeyFor(inlineExitCaret.parentPath) === pathKeyFor(path) &&
+            inlineExitCaret.afterElementIndex === childElementIndex;
 
           return (
-            <VisualNode
-              key={`${elementChild.tagName}-${childNodeIndex}`}
-              node={elementChild}
-              path={childPath}
-              selectedPath={selectedPath}
-              highlightedPathKey={highlightedPathKey}
+            <React.Fragment key={`${elementChild.tagName}-${childNodeIndex}`}>
+              <VisualNode
+                node={elementChild}
+                path={childPath}
+                selectedPath={selectedPath}
+                highlightedPathKey={highlightedPathKey}
                 onSelect={onSelect}
                 onTextChange={onTextChange}
                 onTextNodeChange={onTextNodeChange}
                 onTextInput={onTextInput}
                 onCaretChange={onCaretChange}
-              onListItemEnter={onListItemEnter}
-              onParagraphEnter={onParagraphEnter}
-              onHrefDrop={onHrefDrop}
-              resolveImageHref={resolveImageHref}
-              hrefValidationMap={hrefValidationMap}
-              pinnedSelection={pinnedSelection}
-              visualSearchQuery={visualSearchQuery}
-              onOpenContextMenu={onOpenContextMenu}
-            />
+                onListItemEnter={onListItemEnter}
+                onParagraphEnter={onParagraphEnter}
+                onHrefDrop={onHrefDrop}
+                resolveImageHref={resolveImageHref}
+                hrefValidationMap={hrefValidationMap}
+                pinnedSelection={pinnedSelection}
+                visualSearchQuery={visualSearchQuery}
+                spellingIssues={spellingIssues}
+                inlineExitCaret={inlineExitCaret}
+                onInlineExitTextInput={onInlineExitTextInput}
+                onOpenContextMenu={onOpenContextMenu}
+              />
+              {showInlineExitCaret && (
+                <span
+                  className="dita-text-run inline-exit-caret"
+                  contentEditable
+                  spellCheck={false}
+                  data-inline-exit-caret="true"
+                  data-node-path={path.join(".")}
+                  data-text-node-index="-1"
+                  suppressContentEditableWarning
+                  onMouseDown={handleEditableMouseDown}
+                  onClick={handleEditableClick}
+                  onMouseUp={handleEditableMouseUp}
+                  onFocus={handleEditableFocus}
+                  onInput={(event) => {
+                    const nextText = normalizeEditableInputTarget(event.currentTarget, true);
+                    onInlineExitTextInput(path, childElementIndex, nextText);
+                  }}
+                  onBlur={() => onInlineExitTextInput(path, childElementIndex, "")}
+                >
+                  {editableCaretSeed}
+                </span>
+              )}
+            </React.Fragment>
           );
         })}
       </MixedTag>
     );
   }
 
-  const Tag =
-    tagName === "title"
-      ? "h2"
-      : tagName === "shortdesc"
-        ? "p"
-        : tagName === "li"
-          ? "li"
-          : tagName === "image"
-            ? "div"
-          : tagName === "b"
-            ? "strong"
-            : tagName === "i"
-              ? "em"
-              : tagName === "u" || tagName === "xref" || tagName === "ph"
-                ? "span"
-                : "div";
-  const text = node.textContent || "";
+  const Tag = getVisualTagForElement(tagName) as any;
+  const useEditableCaretSeed = (tagName === "cmd" || rendersInline) && !text.trim();
+  const allowsTextContent = elementAllowsText(tagName);
 
   if (tagName === "image") {
     const href = node.getAttribute("href") || "";
@@ -14676,35 +20046,111 @@ function VisualNode({
     );
   }
 
+  if (!allowsTextContent && !hasElementChildren) {
+    return (
+      <Tag
+        className={`${className} schema-empty-element`}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        title={hrefValidationState?.status === "invalid" ? hrefValidationState.message : undefined}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        tabIndex={0}
+      >
+        <span className="dita-empty-element-label">{tagName}</span>
+      </Tag>
+    );
+  }
+
+  if (rendersInline) {
+    return (
+      <Tag
+        className={`${className}${text.trim() ? " has-live-text" : ""}${useEditableCaretSeed ? " editable-empty" : ""}`}
+        data-dita-tag={tagName}
+        data-node-path={path.join(".")}
+        title={hrefValidationState?.status === "invalid" ? hrefValidationState.message : undefined}
+        onClick={select}
+        onContextMenu={(event) => onOpenContextMenu(event, path)}
+        onDragEnter={isHrefDropTarget ? handleHrefDrag : undefined}
+        onDragOver={isHrefDropTarget ? handleHrefDrag : undefined}
+        onDragLeave={isHrefDropTarget ? () => setIsHrefDragOver(false) : undefined}
+        onDrop={isHrefDropTarget ? handleHrefDrop : undefined}
+        tabIndex={0}
+      >
+        <span
+          className={`dita-text-run inline-leaf-editor${text.trim() ? " has-live-text" : ""}${useEditableCaretSeed ? " editable-empty" : ""}`}
+          contentEditable
+          data-dita-tag={tagName}
+          data-editing-element={tagName}
+          data-node-path={path.join(".")}
+          data-text-node-index={0}
+          data-placeholder={placeholder}
+          suppressContentEditableWarning
+          spellCheck={false}
+          onMouseDown={handleEditableMouseDown}
+          onClick={handleEditableClick}
+          onContextMenu={(event) => onOpenContextMenu(event, path)}
+          onDragEnter={isHrefDropTarget ? handleHrefDrag : undefined}
+          onDragOver={isHrefDropTarget ? handleHrefDrag : undefined}
+          onDragLeave={isHrefDropTarget ? () => setIsHrefDragOver(false) : undefined}
+          onDrop={isHrefDropTarget ? handleHrefDrop : undefined}
+          onKeyDown={(event) => handleEditableEnterKeyDown(event)}
+          onInput={(event) => {
+            const nextText = normalizeEditableInputTarget(event.currentTarget, true);
+            onTextInput(path, nextText, null);
+          }}
+          onPaste={handlePlainTextPaste}
+          onDoubleClick={handleEditableDoubleClick}
+          onFocus={handleEditableFocus}
+          onKeyUp={() => {
+            onCaretChange(getAuthoringSelection());
+          }}
+          onMouseUp={handleEditableMouseUp}
+          onBlur={(event) => onTextChange(path, normalizeEditableBlur(event.currentTarget))}
+        >
+          {useEditableCaretSeed ? editableCaretSeed : text}
+        </span>
+      </Tag>
+    );
+  }
+
 	  return (
 	    <Tag
-	      className={className}
+	      className={`${className}${text.trim() ? " has-live-text" : ""}${useEditableCaretSeed ? " editable-empty" : ""}`}
 	      contentEditable
 	      data-dita-tag={tagName}
 	      data-node-path={path.join(".")}
+	      data-text-node-index={0}
 	      data-placeholder={placeholder}
 	      title={hrefValidationState?.status === "invalid" ? hrefValidationState.message : undefined}
 	      suppressContentEditableWarning
-	      spellCheck="true"
-	      onClick={select}
+	      spellCheck={false}
+	      onMouseDown={rendersInline ? handleEditableMouseDown : undefined}
+	      onClick={rendersInline ? handleEditableClick : select}
 	      onContextMenu={(event) => onOpenContextMenu(event, path)}
 	      onDragEnter={isHrefDropTarget ? handleHrefDrag : undefined}
 	      onDragOver={isHrefDropTarget ? handleHrefDrag : undefined}
 	      onDragLeave={isHrefDropTarget ? () => setIsHrefDragOver(false) : undefined}
 	      onDrop={isHrefDropTarget ? handleHrefDrop : undefined}
 	      onKeyDown={(event) => handleEditableEnterKeyDown(event)}
-	      onInput={(event) => onTextInput(path, event.currentTarget.textContent || "", null)}
+	      onInput={(event) => {
+	        const nextText = normalizeEditableInputTarget(event.currentTarget, true);
+	        onTextInput(path, nextText, null);
+	      }}
 	      onPaste={handlePlainTextPaste}
 	      onDoubleClick={handleEditableDoubleClick}
+      onFocus={rendersInline ? handleEditableFocus : undefined}
       onKeyUp={() => {
         onCaretChange(getAuthoringSelection());
       }}
-      onMouseUp={() => {
+      onMouseUp={rendersInline ? handleEditableMouseUp : () => {
         onCaretChange(getAuthoringSelection());
       }}
-      onBlur={(event) => onTextChange(path, event.currentTarget.textContent)}
+      onBlur={(event) => onTextChange(path, normalizeEditableBlur(event.currentTarget))}
     >
-      {renderTextWithVisualHighlights(text, pinnedSelection, path, 0, visualSearchQuery)}
+      {useEditableCaretSeed
+        ? editableCaretSeed
+        : renderTextWithVisualHighlights(text, pinnedSelection, path, 0, visualSearchQuery, spellingIssues)}
     </Tag>
   );
 }

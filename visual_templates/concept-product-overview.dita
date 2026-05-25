@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE concept PUBLIC "-//OASIS//DTD DITA Concept//EN" "concept.dtd">
+<concept id="concept-product-overview" xml:lang="en-US">
+  <title>AuthFlow content workspace</title>
+  <shortdesc>AuthFlow gives authors a structured workspace for editing DITA topics, managing drafts, validating schema rules, and publishing reviewed content.</shortdesc>
+  <conbody>
+    <p>Authors work in a visual editing surface while the system preserves the underlying XML structure. The workspace shows file state, validation feedback, Git activity, and AI suggestions without requiring the author to leave the document.</p>
+    <section id="workspace-model">
+      <title>Workspace model</title>
+      <p>The editor treats a project as a connected set of topics, maps, images, and working drafts. Each file can be opened, edited, validated, committed, and published through the same authoring flow.</p>
+      <note type="tip">
+        <p>Use this topic as a Hero or Body source in a visual template. The title, shortdesc, and paragraphs are intentionally distinct so region binding changes are easy to see.</p>
+      </note>
+    </section>
+    <section id="authoring-signals">
+      <title>Authoring signals</title>
+      <ul>
+        <li><p>Validation state appears in the terminal and as inline annotations.</p></li>
+        <li><p>Draft state is shown in the tab bar while autosave is running.</p></li>
+        <li><p>Notifications record conflicts, validation errors, and publish results.</p></li>
+      </ul>
+    </section>
+    <fig id="workspace-preview">
+      <title>Workspace preview</title>
+      <image href="../assets/workspace-preview.png" alt="Preview of the authoring workspace"/>
+    </fig>
+  </conbody>
+</concept>

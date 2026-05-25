@@ -65,13 +65,21 @@ function parseAttributes(raw) {
 }
 
 function parseXml(source) {
+  const cleanSource = stripXmlNoise(source);
   const root = { name: "#document", attrs: {}, children: [] };
   const stack = [root];
   const tagPattern = /<([^>]+)>/g;
   let match;
+  let lastIndex = 0;
 
-  while ((match = tagPattern.exec(stripXmlNoise(source)))) {
+  while ((match = tagPattern.exec(cleanSource))) {
+    const text = cleanSource.slice(lastIndex, match.index);
+    if (text.trim()) {
+      stack.at(-1).children.push({ name: "#text", attrs: {}, text: decodeXml(text.trim()), children: [] });
+    }
+
     const raw = match[1].trim();
+    lastIndex = tagPattern.lastIndex;
     if (!raw || raw.startsWith("!") || raw.startsWith("?")) {
       continue;
     }
@@ -140,8 +148,9 @@ function clonePattern(node) {
   return {
     name: localName(node.name),
     attrs: { ...node.attrs },
+    text: node.text || "",
     children: (node.children || [])
-      .filter((child) => rngNamespaceTags.has(localName(child.name)))
+      .filter((child) => child.name === "#text" || rngNamespaceTags.has(localName(child.name)))
       .map(clonePattern),
   };
 }
@@ -236,6 +245,12 @@ function patternToModel(pattern, defines, options = {}) {
   }
   if (tag === "empty") {
     return { type: "empty" };
+  }
+  if (tag === "value") {
+    return {
+      type: "value",
+      value: pattern.children?.find((child) => child.name === "#text")?.text || "",
+    };
   }
   if (tag === "element") {
     return { type: "element", name: pattern.attrs.name || "(anonymous)" };
@@ -366,6 +381,19 @@ function collectRefs(model, result = new Set()) {
   return result;
 }
 
+function collectValuesFromModel(model, result = []) {
+  if (!model) {
+    return result;
+  }
+  if (model.type === "value" && model.value) {
+    result.push(model.value);
+  }
+  for (const child of model.children || []) {
+    collectValuesFromModel(child, result);
+  }
+  return result;
+}
+
 function summarizeContent(defines, elementName) {
   const model = getDefineModel(defines, `${elementName}.content`);
   const allowed = new Map();
@@ -397,7 +425,11 @@ function collectAttributesFromModel(model, defines, result, seen = new Set(), de
   }
 
   if (model.type === "attribute" && model.name) {
-    result.add(model.name);
+    const existing = result.get(model.name) || { name: model.name, values: new Set() };
+    for (const value of collectValuesFromModel(model)) {
+      existing.values.add(value);
+    }
+    result.set(model.name, existing);
   }
 
   for (const child of model.children || []) {
@@ -406,10 +438,15 @@ function collectAttributesFromModel(model, defines, result, seen = new Set(), de
 }
 
 function collectAttributes(defines, elementName) {
-  const result = new Set();
+  const result = new Map();
   collectAttributesFromModel(getDefineModel(defines, `${elementName}.attributes`), defines, result);
   collectAttributesFromModel(getDefineModel(defines, `${elementName}.attlist`), defines, result);
-  return [...result].sort();
+  return [...result.values()]
+    .map((attribute) => ({
+      name: attribute.name,
+      values: [...attribute.values],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function collectElements(defines, elementSources) {

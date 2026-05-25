@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE map PUBLIC "-//OASIS//DTD DITA Map//EN" "map.dtd">
+<map id="template-showcase-map">
+  <title>Visual Template Showcase</title>
+  <topicref href="concept-product-overview.dita" navtitle="Product overview"/>
+  <topicref href="task-configure-workflow.dita" navtitle="Configure workflow"/>
+  <topicref href="reference-capability-matrix.dita" navtitle="Capability matrix"/>
+  <topicref href="concept-release-story.dita" navtitle="Release story"/>
+</map>

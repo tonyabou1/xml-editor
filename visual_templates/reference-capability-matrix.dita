@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE reference PUBLIC "-//OASIS//DTD DITA Reference//EN" "reference.dtd">
+<reference id="reference-capability-matrix" xml:lang="en-US">
+  <title>Authoring capability matrix</title>
+  <shortdesc>Compare the major authoring capabilities used by editing, validation, publishing, and AI-assisted review workflows.</shortdesc>
+  <refbody>
+    <section id="capability-summary">
+      <title>Capability summary</title>
+      <p>The following table is intentionally dense so table-aware template regions can show useful structured content.</p>
+      <table>
+        <title>Core capabilities</title>
+        <tgroup cols="3">
+          <colspec colname="col1"/>
+          <colspec colname="col2"/>
+          <colspec colname="col3"/>
+          <thead>
+            <row>
+              <entry>Area</entry>
+              <entry>Primary user</entry>
+              <entry>Outcome</entry>
+            </row>
+          </thead>
+          <tbody>
+            <row>
+              <entry>Schema validation</entry>
+              <entry>Author</entry>
+              <entry>Invalid DITA is caught before publish.</entry>
+            </row>
+            <row>
+              <entry>Git workflow</entry>
+              <entry>Reviewer</entry>
+              <entry>Changes are committed, reviewed, and published with history.</entry>
+            </row>
+            <row>
+              <entry>AI assistance</entry>
+              <entry>Writer</entry>
+              <entry>Suggestions are generated from DITA-aware context.</entry>
+            </row>
+          </tbody>
+        </tgroup>
+      </table>
+    </section>
+    <section id="attribute-examples">
+      <title>Attribute examples</title>
+      <p>Reference topics often include values such as <codeph>xml:lang</codeph>, <codeph>href</codeph>, and <codeph>outputclass</codeph> that template rules may expose as metadata.</p>
+    </section>
+  </refbody>
+</reference>

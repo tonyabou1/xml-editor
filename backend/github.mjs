@@ -223,6 +223,7 @@ export async function getGitHubRepositoryTree(userId) {
       sha: entry.sha,
       size: entry.size || 0,
     }));
+  await enrichDitaEntryTypes(entries, connection.access_token, repository.full_name);
   const sync = await syncGitHubTreeMetadata(userId, repository, entries);
 
   return {
@@ -279,6 +280,22 @@ export async function getGitHubFileContentAtRef(userId, { filePath, ref } = {}) 
 
 function hashContent(value) {
   return crypto.createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
+}
+
+function assertPublishableContent(filePath, contentFormat, contentText) {
+  if (!isXmlLikeContent(filePath, contentFormat) || String(contentText ?? "").trim()) {
+    return;
+  }
+
+  throw Object.assign(new Error(`Refusing to commit empty XML/DITA content for ${filePath}. Open the file and save valid XML before committing.`), {
+    statusCode: 400,
+  });
+}
+
+function isXmlLikeContent(filePath, contentFormat) {
+  const extension = String(filePath || "").split(".").pop()?.toLowerCase() || "";
+  const format = String(contentFormat || "").toLowerCase();
+  return ["xml", "dita", "ditamap"].includes(extension) || ["xml", "dita", "map", "topic", "concept", "task", "reference"].includes(format);
 }
 
 export async function listGitHubBranches(userId) {
@@ -506,6 +523,7 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
     const draft = draftsByPath.get(filePath);
     const currentFile = currentFilesByPath.get(filePath);
     const knownSha = draft.github_sha || "";
+    const contentText = String(draft.content_text ?? "");
 
     if (knownSha && currentFile?.sha && currentFile.sha !== knownSha) {
       conflicts.push(`${filePath} changed in GitHub since it was pulled`);
@@ -515,6 +533,7 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
       conflicts.push(`${filePath} already exists in GitHub`);
       continue;
     }
+    assertPublishableContent(filePath, draft.content_format, contentText);
 
     const blob = await fetchGitHubJson(
       `/repos/${repositoryName}/git/blobs`,
@@ -522,7 +541,7 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
       {
         method: "POST",
         body: {
-          content: String(draft.content_text ?? ""),
+          content: contentText,
           encoding: "utf-8",
         },
       },
@@ -533,9 +552,9 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
       mode: "100644",
       type: "blob",
       sha: blob.sha,
-      contentHash: hashContent(draft.content_text),
+      contentHash: hashContent(contentText),
       contentFormat: draft.content_format || "xml",
-      sizeBytes: Buffer.byteLength(String(draft.content_text ?? ""), "utf8"),
+      sizeBytes: Buffer.byteLength(contentText, "utf8"),
     });
   }
 
@@ -662,7 +681,9 @@ export async function createGitHubLocalCommit(userId, { filePaths, message }) {
         content_format,
         content_text,
         source_content_hash,
-        coalesce(draft_content_hash, encode(digest(content_text, 'sha256'), 'hex')) as draft_content_hash
+        coalesce(draft_content_hash, encode(digest(content_text, 'sha256'), 'hex')) as draft_content_hash,
+        deleted_at,
+        change_type
       from github_file_drafts
       where github_repository_id = $1
         and user_id = $2
@@ -705,7 +726,11 @@ export async function createGitHubLocalCommit(userId, { filePaths, message }) {
   for (const filePath of normalizedPaths) {
     const draft = draftsByPath.get(filePath);
     const contentText = String(draft.content_text ?? "");
-    const sizeBytes = Buffer.byteLength(contentText, "utf8");
+    const changeType = draft.deleted_at || draft.change_type === "delete" ? "delete" : "upsert";
+    if (changeType !== "delete") {
+      assertPublishableContent(filePath, draft.content_format, contentText);
+    }
+    const sizeBytes = changeType === "delete" ? 0 : Buffer.byteLength(contentText, "utf8");
 
     const fileResult = await query(
       `
@@ -717,20 +742,22 @@ export async function createGitHubLocalCommit(userId, { filePaths, message }) {
           draft_content_hash,
           content_format,
           content_text,
-          size_bytes
+          size_bytes,
+          change_type
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8)
-        returning file_path, github_sha, source_content_hash, draft_content_hash, content_format, size_bytes
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        returning file_path, github_sha, source_content_hash, draft_content_hash, content_format, size_bytes, change_type
       `,
       [
         localCommit.id,
         filePath,
         draft.github_sha || null,
         draft.source_content_hash || null,
-        draft.draft_content_hash || hashContent(contentText),
+        draft.draft_content_hash || hashContent(changeType === "delete" ? "" : contentText),
         draft.content_format || "xml",
-        contentText,
+        changeType === "delete" ? "" : contentText,
         sizeBytes,
+        changeType,
       ],
     );
     files.push(fileResult.rows[0]);
@@ -768,7 +795,8 @@ export async function listGitHubLocalCommits(userId, { branch } = {}) {
               'githubSha', github_local_commit_files.github_sha,
               'draftContentHash', github_local_commit_files.draft_content_hash,
               'contentFormat', github_local_commit_files.content_format,
-              'sizeBytes', github_local_commit_files.size_bytes
+              'sizeBytes', github_local_commit_files.size_bytes,
+              'changeType', github_local_commit_files.change_type
             )
             order by github_local_commit_files.file_path
           ) filter (where github_local_commit_files.id is not null),
@@ -836,7 +864,8 @@ export async function publishGitHubLocalCommits(userId, { localCommitIds } = {})
           draft_content_hash,
           content_format,
           content_text,
-          size_bytes
+          size_bytes,
+          change_type
         from github_local_commit_files
         where local_commit_id = $1
         order by file_path
@@ -936,6 +965,7 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
     const currentFile = currentFilesByPath.get(filePath);
     const knownSha = file.github_sha || "";
     const contentText = String(file.content_text ?? "");
+    const changeType = file.change_type === "delete" ? "delete" : "upsert";
 
     if (knownSha && currentFile?.sha && currentFile.sha !== knownSha) {
       let remoteContent = "";
@@ -960,7 +990,7 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
       });
       continue;
     }
-    if (!knownSha && currentFile?.sha) {
+    if (!knownSha && currentFile?.sha && changeType !== "delete") {
       conflicts.push({
         filePath,
         baseSha: "",
@@ -973,6 +1003,23 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
       });
       continue;
     }
+
+    if (changeType === "delete") {
+      if (currentFile?.sha) {
+        tree.push({
+          path: filePath,
+          mode: "100644",
+          type: "blob",
+          sha: null,
+          contentHash: hashContent(""),
+          contentFormat: file.content_format || "xml",
+          sizeBytes: 0,
+          changeType,
+        });
+      }
+      continue;
+    }
+    assertPublishableContent(filePath, file.content_format, contentText);
 
     const blob = await fetchGitHubJson(
       `/repos/${repositoryName}/git/blobs`,
@@ -994,6 +1041,7 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
       contentHash: hashContent(contentText),
       contentFormat: file.content_format || "xml",
       sizeBytes: Number(file.size_bytes || Buffer.byteLength(contentText, "utf8")),
+      changeType,
     });
   }
 
@@ -1057,16 +1105,29 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
             source_content_hash = $5,
             draft_content_hash = $5,
             dirty = false,
+            deleted_at = case when $6 = 'delete' then deleted_at else null end,
+            change_type = $6,
             saved_at = now(),
             updated_at = now()
         where github_repository_id = $1
           and user_id = $2
           and file_path = $3
       `,
-      [repository.id, userId, entry.path, entry.sha, entry.contentHash],
+      [repository.id, userId, entry.path, entry.sha, entry.contentHash, entry.changeType],
     );
 
-    if (project) {
+    if (project && entry.changeType === "delete") {
+      await query(
+        `
+          update project_files
+          set deleted_at = now(),
+              updated_at = now()
+          where project_id = $1
+            and path = $2
+        `,
+        [project.id, entry.path],
+      );
+    } else if (project) {
       await upsertProjectFileWithParents({
         projectId: project.id,
         filePath: entry.path,
@@ -1081,6 +1142,7 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
       path: entry.path,
       sha: entry.sha,
       contentHash: entry.contentHash,
+      changeType: entry.changeType,
     });
   }
 
@@ -1203,7 +1265,7 @@ async function syncGitHubTreeMetadata(userId, repository, entries) {
       path: normalizedPath,
       name,
       kind: entry.type === "folder" ? "folder" : "file",
-      ditaType: entry.type === "file" ? inferDitaType(name) : null,
+      ditaType: entry.type === "file" ? entry.ditaType || inferDitaType(name) : null,
       mimeType: entry.type === "file" ? inferMimeType(name) : null,
       githubSha: entry.sha || null,
       sizeBytes: entry.type === "file" ? entry.size || null : null,
@@ -1299,6 +1361,7 @@ async function upsertProjectFile(file) {
         mime_type = excluded.mime_type,
         github_sha = excluded.github_sha,
         size_bytes = excluded.size_bytes,
+        deleted_at = null,
         updated_by = excluded.updated_by,
         updated_at = now()
       returning id
@@ -1353,6 +1416,41 @@ function inferDitaType(fileName) {
   if (/^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)) return "image";
   if (["html", "htm"].includes(extension)) return "html";
   return "text";
+}
+
+async function enrichDitaEntryTypes(entries, accessToken, repositoryFullName) {
+  for (const entry of entries) {
+    if (entry.type !== "file" || !isDitaXmlPath(entry.path) || !entry.sha) {
+      continue;
+    }
+    if (Number(entry.size || 0) > 1024 * 1024) {
+      entry.ditaType = inferDitaType(entry.path);
+      continue;
+    }
+
+    try {
+      const blob = await fetchGitHubJson(
+        `/repos/${encodeRepositoryFullName(repositoryFullName)}/git/blobs/${encodeURIComponent(entry.sha)}`,
+        accessToken,
+      );
+      entry.ditaType = inferDitaTypeFromXml(Buffer.from(String(blob.content || "").replace(/\s/g, ""), "base64").toString("utf8")) ||
+        inferDitaType(entry.path);
+    } catch {
+      entry.ditaType = inferDitaType(entry.path);
+    }
+  }
+}
+
+function isDitaXmlPath(filePath) {
+  const extension = String(filePath || "").split(".").pop()?.toLowerCase() || "";
+  return extension === "dita" || extension === "ditamap" || extension === "xml";
+}
+
+function inferDitaTypeFromXml(xml) {
+  const source = String(xml || "").replace(/^\uFEFF/, "").replace(/^\s*<\?xml[\s\S]*?\?>/i, "").replace(/^\s*<!DOCTYPE[\s\S]*?>/i, "");
+  const match = source.match(/^\s*<([A-Za-z_][\w:.-]*)\b/);
+  const rootName = match?.[1]?.split(":").pop() || "";
+  return rootName || "";
 }
 
 function inferMimeType(fileName) {

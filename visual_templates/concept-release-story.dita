@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE concept PUBLIC "-//OASIS//DTD DITA Concept//EN" "concept.dtd">
+<concept id="concept-release-story" xml:lang="en-US">
+  <title>Release readiness story</title>
+  <shortdesc>A narrative topic that explains how a documentation team prepares a release package for review and publication.</shortdesc>
+  <conbody>
+    <p>The release team starts by reviewing open drafts, checking validation reports, and confirming that every referenced image and topic exists in the project workspace.</p>
+    <p>After the content passes validation, authors use the Git panel to commit the selected files. The publish action remains separate so the team can review local commits before sending them to the provider.</p>
+    <section id="review-moments">
+      <title>Review moments</title>
+      <p>Reviewers focus on structural quality, terminology, links, and consistency with the release message. AI suggestions can help identify missing short descriptions, long paragraphs, or duplicate passages.</p>
+      <dl>
+        <dlentry>
+          <dt>Structure</dt>
+          <dd><p>Confirm that concepts, tasks, and references use the expected DITA elements.</p></dd>
+        </dlentry>
+        <dlentry>
+          <dt>References</dt>
+          <dd><p>Check that xrefs, images, and map topicrefs resolve before publication.</p></dd>
+        </dlentry>
+      </dl>
+    </section>
+    <section id="template-use">
+      <title>Template use</title>
+      <p>This topic works well as a narrative body source for visual templates because it includes multiple paragraphs, a definition list, and section titles.</p>
+    </section>
+  </conbody>
+</concept>

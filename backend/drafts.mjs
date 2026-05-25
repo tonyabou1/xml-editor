@@ -18,7 +18,10 @@ export async function getGitHubFileDraft(userId, filePath) {
         draft_content_hash,
         content_format,
         content_text,
+        deleted_at,
+        change_type,
         case
+          when deleted_at is not null then true
           when source_content_hash is null then dirty
           else draft_content_hash is distinct from source_content_hash
         end as dirty,
@@ -28,6 +31,12 @@ export async function getGitHubFileDraft(userId, filePath) {
       where github_repository_id = $1
         and user_id = $2
         and file_path = $3
+        and deleted_at is null
+        and change_type <> 'delete'
+        and (
+          (source_content_hash is null and dirty = true)
+          or draft_content_hash is distinct from source_content_hash
+        )
       limit 1
     `,
     [repository.id, userId, normalizedPath],
@@ -43,6 +52,11 @@ export async function saveGitHubFileDraft(userId, draft) {
   const normalizedPath = normalizeDraftPath(draft.filePath);
   if (!normalizedPath) {
     throw Object.assign(new Error("A draft file path is required."), { statusCode: 400 });
+  }
+  if (isXmlLikeDraft(normalizedPath, draft.contentFormat) && !String(draft.content ?? "").trim()) {
+    throw Object.assign(new Error(`Refusing to save an empty XML/DITA draft for ${normalizedPath}.`), {
+      statusCode: 400,
+    });
   }
 
   const repository = await getSelectedRepository(userId);
@@ -74,9 +88,11 @@ export async function saveGitHubFileDraft(userId, draft) {
         draft_content_hash,
         content_format,
         content_text,
-        dirty
+        dirty,
+        deleted_at,
+        change_type
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, null, 'upsert')
       on conflict (github_repository_id, user_id, file_path)
       do update set
         organization_id = excluded.organization_id,
@@ -87,6 +103,8 @@ export async function saveGitHubFileDraft(userId, draft) {
         content_format = excluded.content_format,
         content_text = excluded.content_text,
         dirty = excluded.dirty,
+        deleted_at = null,
+        change_type = 'upsert',
         saved_at = now(),
         updated_at = now()
       returning
@@ -97,7 +115,10 @@ export async function saveGitHubFileDraft(userId, draft) {
         draft_content_hash,
         content_format,
         content_text,
+        deleted_at,
+        change_type,
         case
+          when deleted_at is not null then true
           when source_content_hash is null then dirty
           else draft_content_hash is distinct from source_content_hash
         end as dirty,
@@ -126,8 +147,90 @@ export async function saveGitHubFileDraft(userId, draft) {
   };
 }
 
+export async function discardGitHubFileDraft(userId, rawFilePath) {
+  const normalizedPath = normalizeDraftPath(rawFilePath);
+  if (!normalizedPath) {
+    throw Object.assign(new Error("A draft file path is required."), { statusCode: 400 });
+  }
+
+  const repository = await getSelectedRepository(userId);
+  const project = await getSelectedProject(repository);
+  const draftResult = await query(
+    `
+      select id, file_path, github_sha, deleted_at, change_type
+      from github_file_drafts
+      where github_repository_id = $1
+        and user_id = $2
+        and file_path = $3
+      limit 1
+    `,
+    [repository.id, userId, normalizedPath],
+  );
+  const fileResult = project
+    ? await query(
+        `
+          select id, github_sha
+          from project_files
+          where project_id = $1
+            and path = $2
+          limit 1
+        `,
+        [project.id, normalizedPath],
+      )
+    : { rows: [] };
+  const draft = draftResult.rows[0] || null;
+  const projectFile = fileResult.rows[0] || null;
+  const hasProviderVersion = Boolean(draft?.github_sha || projectFile?.github_sha);
+
+  await query(
+    `
+      delete from github_file_drafts
+      where github_repository_id = $1
+        and user_id = $2
+        and file_path = $3
+    `,
+    [repository.id, userId, normalizedPath],
+  );
+
+  if (project && hasProviderVersion) {
+    await query(
+      `
+        update project_files
+        set deleted_at = null,
+            updated_at = now()
+        where project_id = $1
+          and path = $2
+      `,
+      [project.id, normalizedPath],
+    );
+  } else if (project) {
+    await query(
+      `
+        delete from project_files
+        where project_id = $1
+          and path = $2
+          and github_sha is null
+      `,
+      [project.id, normalizedPath],
+    );
+  }
+
+  return {
+    repository,
+    path: normalizedPath,
+    action: hasProviderVersion ? "restored-provider-version" : "removed-local-file",
+    hadDraft: Boolean(draft),
+  };
+}
+
 function hashContent(value) {
   return crypto.createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
+}
+
+function isXmlLikeDraft(filePath, contentFormat) {
+  const extension = String(filePath || "").split(".").pop()?.toLowerCase() || "";
+  const format = String(contentFormat || "").toLowerCase();
+  return ["xml", "dita", "ditamap"].includes(extension) || ["xml", "dita", "map", "topic", "concept", "task", "reference"].includes(format);
 }
 
 async function getSelectedRepository(userId) {
@@ -147,6 +250,22 @@ async function getSelectedRepository(userId) {
   }
 
   return result.rows[0];
+}
+
+async function getSelectedProject(repository) {
+  const result = await query(
+    `
+      select id
+      from projects
+      where repository_url is not null
+        and name = $1
+      order by updated_at desc
+      limit 1
+    `,
+    [repository.full_name],
+  );
+
+  return result.rows[0] || null;
 }
 
 async function getPrimaryMembership(userId) {
@@ -266,6 +385,7 @@ async function upsertProjectFile(file) {
         mime_type = excluded.mime_type,
         github_sha = excluded.github_sha,
         size_bytes = excluded.size_bytes,
+        deleted_at = null,
         updated_by = excluded.updated_by,
         updated_at = now()
       returning id, path, kind

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE task PUBLIC "-//OASIS//DTD DITA Task//EN" "task.dtd">
+<task id="task-configure-workflow" xml:lang="en-US">
+  <title>Configure a publishing workflow</title>
+  <shortdesc>Create a branch, edit a topic, validate the draft, and publish changes when the content is ready.</shortdesc>
+  <taskbody>
+    <context>
+      <p>Use this task when testing process-oriented template regions. The steps provide clear ordered content for body and card layouts.</p>
+    </context>
+    <steps>
+      <step>
+        <cmd>Select the project branch from the Git panel.</cmd>
+        <info><p>The branch controls which repository version the Explorer displays.</p></info>
+      </step>
+      <step>
+        <cmd>Open the topic that needs an update.</cmd>
+        <info><p>The editor loads the current draft from Postgres or fetches the file from the provider if needed.</p></info>
+      </step>
+      <step>
+        <cmd>Validate the topic before publishing.</cmd>
+        <info><p>Validation uses DITA-OT and includes referenced topics and images in the temporary validation workspace.</p></info>
+      </step>
+      <step>
+        <cmd>Commit the selected files and publish to origin.</cmd>
+        <info><p>If GitHub changed since the draft was created, the system blocks publishing and opens the conflict resolver.</p></info>
+      </step>
+    </steps>
+    <result>
+      <p>The branch contains a validated commit that can be reviewed or published to the configured provider.</p>
+    </result>
+  </taskbody>
+</task>

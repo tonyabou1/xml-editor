@@ -13,7 +13,7 @@ import {
 import { requireAuth0User } from "./auth0.mjs";
 import { buildDitaRngSchema } from "./ditaRngSchema.mjs";
 import { getDatabaseStatus } from "./db.mjs";
-import { getGitHubFileDraft, saveGitHubFileDraft } from "./drafts.mjs";
+import { discardGitHubFileDraft, getGitHubFileDraft, saveGitHubFileDraft } from "./drafts.mjs";
 import {
   completeGitHubOAuth,
   checkoutGitHubBranch,
@@ -39,7 +39,8 @@ import {
   createUserNotification,
   listUserNotifications,
 } from "./notifications.mjs";
-import { getCurrentProjectTree } from "./projects.mjs";
+import { deleteCurrentProjectPath, getCurrentProjectTree } from "./projects.mjs";
+import { addUserSpellingDictionaryWord, checkSpellingSegments } from "./spelling.mjs";
 import {
   listSpecializations,
   previewSpecialization,
@@ -731,6 +732,14 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (req.method === "DELETE" && url.pathname === "/api/projects/path") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await deleteCurrentProjectPath(account.user.id, body.path));
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/notifications") {
     const identity = await requireAuth0User(req);
     const account = await syncAuthenticatedUser(identity);
@@ -952,6 +961,14 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/drafts/github/discard") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await discardGitHubFileDraft(account.user.id, body.path));
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/schema/dita") {
     const ditaOt = await getDitaOtStatus();
     if (!ditaOt.home) {
@@ -1046,6 +1063,22 @@ async function handleRequest(req, res) {
     await requireAuth0User(req);
     const body = await readJsonBody(req);
     sendJson(res, 200, await generateAiRewrite(body));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/spelling/check") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await checkSpellingSegments(body, { userId: account.user.id }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/spelling/dictionary") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await addUserSpellingDictionaryWord(account.user.id, body));
     return;
   }
 
