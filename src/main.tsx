@@ -141,14 +141,26 @@ const specializationsTabFile = {
 const visualTemplatesTabId = "system-visual-template-designer";
 const visualTemplatesTabFile = {
   id: visualTemplatesTabId,
-  name: "Template Bindings",
+  name: "Visual Template",
   type: "file",
-  ditaType: "visual-template-binding",
+  ditaType: "visual-template",
   content: "",
 };
+const visualTemplatePageSize = { width: 760, height: 560 };
+const visualTemplateGridDefaults = {
+  showGrid: true,
+  gridSize: 16,
+  snapToGrid: true,
+  snapToObjects: true,
+  snapThreshold: 4,
+  columnGuideCount: 0,
+  zoom: 1,
+};
+type VisualTemplateResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
 const defaultVisualTemplateModel = {
-  id: "topic-deliverable-binding",
-  name: "Topic deliverable binding",
+  artifactType: "template",
+  id: "topic-deliverable-template",
+  name: "Topic deliverable template",
   template: {
     id: "topic-deliverable-template",
     name: "Topic deliverable template",
@@ -160,9 +172,11 @@ const defaultVisualTemplateModel = {
     {
       id: "hero",
       label: "Hero",
+      kind: "container",
       role: "headline",
       binding: "title",
       notes: "Primary title slot for the selected topic or map.",
+      layout: { x: 28, y: 28, width: 704, height: 150, zIndex: 1 },
       style: {
         fillMode: "gradient",
         backgroundColor: "#eef5ff",
@@ -193,31 +207,53 @@ const defaultVisualTemplateModel = {
       },
       textStyle: {
         color: "#172033",
-        fontSize: 30,
-        fontWeight: 850,
-        textAlign: "left",
-      },
-    },
-    {
-      id: "summary",
-      label: "Summary",
-      role: "deck",
-      binding: "shortdesc",
-      notes: "Short description or generated abstract.",
-      style: {},
-      textStyle: {
-        color: "#475467",
         fontSize: 13,
         fontWeight: 650,
         textAlign: "left",
       },
     },
     {
+      id: "heroTitle",
+      label: "Title",
+      kind: "slot",
+      parentId: "hero",
+      role: "headline",
+      binding: "title",
+      notes: "Primary title slot inside the hero container.",
+      layout: { x: 22, y: 30, width: 470, height: 44, zIndex: 2 },
+      style: {},
+      textStyle: {
+        color: "#172033",
+        fontSize: 22,
+        fontWeight: 800,
+        textAlign: "left",
+      },
+    },
+    {
+      id: "summary",
+      label: "Summary",
+      kind: "slot",
+      parentId: "hero",
+      role: "deck",
+      binding: "shortdesc",
+      notes: "Short description or generated abstract.",
+      layout: { x: 22, y: 88, width: 470, height: 38, zIndex: 2 },
+      style: {},
+      textStyle: {
+        color: "#475467",
+        fontSize: 13,
+        fontWeight: 550,
+        textAlign: "left",
+      },
+    },
+    {
       id: "body",
       label: "Body",
+      kind: "container",
       role: "flow",
       binding: "bodyParagraphs",
       notes: "Main authored paragraphs and sections.",
+      layout: { x: 28, y: 196, width: 500, height: 320, zIndex: 1 },
       style: {
         fillMode: "solid",
         backgroundColor: "#ffffff",
@@ -256,9 +292,11 @@ const defaultVisualTemplateModel = {
     {
       id: "sidebar",
       label: "Sidebar",
+      kind: "container",
       role: "navigation",
       binding: "topicrefs",
       notes: "Map topic references or supporting links.",
+      layout: { x: 552, y: 196, width: 180, height: 320, zIndex: 1 },
       style: {
         fillMode: "solid",
         backgroundColor: "#fbfdff",
@@ -298,6 +336,13 @@ const defaultVisualTemplateModel = {
 };
 
 const visualTemplateStyleDefaults = {
+  layout: {
+    x: 40,
+    y: 40,
+    width: 260,
+    height: 160,
+    zIndex: 1,
+  },
   style: {
     fillMode: "solid",
     backgroundColor: "#ffffff",
@@ -334,6 +379,38 @@ const visualTemplateStyleDefaults = {
   },
 };
 
+function normalizeVisualTemplateLayout(layout: any, fallback: any = visualTemplateStyleDefaults.layout) {
+  const source = layout && typeof layout === "object" ? layout : {};
+  return {
+    ...fallback,
+    x: Number.isFinite(Number(source.x)) ? Number(source.x) : fallback.x,
+    y: Number.isFinite(Number(source.y)) ? Number(source.y) : fallback.y,
+    width: Number.isFinite(Number(source.width)) ? Number(source.width) : fallback.width,
+    height: Number.isFinite(Number(source.height)) ? Number(source.height) : fallback.height,
+    zIndex: Number.isFinite(Number(source.zIndex)) ? Number(source.zIndex) : fallback.zIndex,
+  };
+}
+
+function normalizeVisualTemplateGridSettings(settings: any) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  const gridSize = Number(source.gridSize);
+  const snapThreshold = Number(source.snapThreshold);
+  const zoom = Number(source.zoom);
+  const columnGuideCount = Number(source.columnGuideCount);
+
+  return {
+    ...visualTemplateGridDefaults,
+    ...source,
+    gridSize: [8, 16, 24].includes(gridSize) ? gridSize : visualTemplateGridDefaults.gridSize,
+    snapThreshold: Number.isFinite(snapThreshold) ? Math.max(1, Math.min(16, snapThreshold)) : visualTemplateGridDefaults.snapThreshold,
+    columnGuideCount: [0, 2, 3, 12].includes(columnGuideCount) ? columnGuideCount : visualTemplateGridDefaults.columnGuideCount,
+    zoom: Number.isFinite(zoom) ? Math.max(0.25, Math.min(4, zoom)) : visualTemplateGridDefaults.zoom,
+    showGrid: source.showGrid !== false,
+    snapToGrid: source.snapToGrid !== false,
+    snapToObjects: source.snapToObjects !== false,
+  };
+}
+
 function normalizeVisualTemplateStyle(style: any, fallback: any = {}) {
   return {
     ...fallback,
@@ -368,16 +445,22 @@ function cssUrlValue(value = "") {
 
 function normalizeVisualTemplateModel(rawModel: any) {
   const model = rawModel && typeof rawModel === "object" ? rawModel : {};
+  const artifactType = model.artifactType === "binding" ? "binding" : "template";
   const template = model.template && typeof model.template === "object"
     ? model.template
     : defaultVisualTemplateModel.template;
   const defaultRegionsById = new Map(defaultVisualTemplateModel.regions.map((region) => [region.id, region]));
-  const regions = Array.isArray(model.regions) && model.regions.length
+  const regions = Array.isArray(model.regions)
     ? model.regions.map((region) => {
         const fallback = defaultRegionsById.get(region?.id) || defaultVisualTemplateModel.regions[0];
-        return {
+        const normalizedRegion = {
           ...fallback,
           ...(region && typeof region === "object" ? region : {}),
+        };
+        return {
+          ...normalizedRegion,
+          kind: normalizedRegion.kind || (normalizedRegion.parentId ? "slot" : "container"),
+          layout: normalizeVisualTemplateLayout(region?.layout, fallback.layout || visualTemplateStyleDefaults.layout),
           style: normalizeVisualTemplateStyle(region?.style, fallback.style || visualTemplateStyleDefaults.style),
           textStyle: normalizeVisualTemplateStyle(region?.textStyle, fallback.textStyle || visualTemplateStyleDefaults.textStyle),
         };
@@ -387,6 +470,8 @@ function normalizeVisualTemplateModel(rawModel: any) {
   return {
     ...defaultVisualTemplateModel,
     ...model,
+    artifactType,
+    gridSettings: normalizeVisualTemplateGridSettings(model.gridSettings),
     template,
     regions,
   };
@@ -900,8 +985,10 @@ function elementAllowsText(tagName: string): boolean {
 }
 
 const ditaFileTypes = fallbackDitaSchemaProfile.fileTypes;
+const visualTemplateFileType = { key: "visual-template", label: "Visual Template", extension: "af-template.json" };
 const genericFileTypes = [
   ...ditaFileTypes,
+  visualTemplateFileType,
   { key: "text", label: "Text", extension: "txt" },
   { key: "html", label: "HTML", extension: "html" },
   { key: "image", label: "Image", extension: "png" },
@@ -986,6 +1073,7 @@ function getAttributeDefinitions(tagName: string): AttributeDefinition[] {
 }
 
 function getDefaultFileStem(typeKey: string): string {
+  if (typeKey === "visual-template") return "new-template";
   return `new-${typeKey}`;
 }
 
@@ -1942,7 +2030,10 @@ function getRequiredTemplateChildren(definition: ElementDefinition) {
 function normalizeFileName(name, typeKey) {
   const extension = getDocumentTypeFileExtension(typeKey);
   const trimmed = name.trim() || `new-${typeKey || "file"}`;
-  const withoutExtension = trimmed.replace(/\.[^./]+$/i, "");
+  const extensionSuffix = `.${extension}`;
+  const withoutExtension = trimmed.toLowerCase().endsWith(extensionSuffix.toLowerCase())
+    ? trimmed.slice(0, -extensionSuffix.length)
+    : trimmed.replace(/\.[^./]+$/i, "");
   return `${withoutExtension}.${extension}`;
 }
 
@@ -1994,6 +2085,7 @@ function getProjectFileIconKind(file) {
   if (!file || file.type !== "file") return "file";
 
   const extension = getFileExtension(file.name);
+  if (file.ditaType === "visual-template") return "visual-template";
   if (["topic", "concept", "task", "reference", "map"].includes(file.ditaType)) {
     return file.ditaType;
   }
@@ -2015,8 +2107,36 @@ function isTextEditableFile(file) {
   return ["xml", "html", "text"].includes(getProjectFileKind(file));
 }
 
+function slugifyWorkspaceArtifactName(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function createGenericFileContent(typeKey: string, name: string) {
   const title = name.replace(/\.[^./]+$/i, "").replace(/[-_]+/g, " ");
+
+  if (typeKey === "visual-template") {
+    const templateId = `template-${slugifyWorkspaceArtifactName(title) || Date.now().toString(36)}`;
+    return JSON.stringify(
+      normalizeVisualTemplateModel({
+        ...defaultVisualTemplateModel,
+        artifactType: "template",
+        id: templateId,
+        name: title || "Visual template",
+        template: {
+          id: templateId,
+          name: title || "Visual template",
+          source: "workspace",
+        },
+        filePath: "",
+      }),
+      null,
+      2,
+    );
+  }
 
   if (isDitaDocumentType(typeKey)) {
     return createDitaTemplate(typeKey, title);
@@ -2082,6 +2202,24 @@ function findProjectNode(node, id, parent = null) {
 
   for (const child of node.children) {
     const match = findProjectNode(child, id, node);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function findProjectFolderByPath(node, targetPath: string, pathParts: string[] = []) {
+  const currentPathParts = [...pathParts, node.name];
+  const currentPath = getProjectNodePath(currentPathParts);
+
+  if (node.type === "folder" && currentPath === targetPath) {
+    return { node, path: currentPath };
+  }
+
+  if (node.type !== "folder") return null;
+
+  for (const child of node.children) {
+    const match = findProjectFolderByPath(child, targetPath, currentPathParts);
     if (match) return match;
   }
 
@@ -5662,7 +5800,7 @@ function App() {
   const [mode, setMode] = useState("visual");
   const [activeLeftPanel, setActiveLeftPanel] = useState<"explorer" | "doc" | "git" | null>("explorer");
   const [lastLeftPanel, setLastLeftPanel] = useState<"explorer" | "doc" | "git">("explorer");
-  const [activeSidePanel, setActiveSidePanel] = useState<SidePanelId | null>("inspector");
+  const [activeSidePanel, setActiveSidePanel] = useState<SidePanelId | null>(null);
   const [lastSidePanel, setLastSidePanel] = useState<SidePanelId>("inspector");
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle");
   const [voiceMessage, setVoiceMessage] = useState("Voice assistant is ready when your OpenAI API key is configured.");
@@ -5768,11 +5906,48 @@ function App() {
   });
   const [visualTemplateModel, setVisualTemplateModel] = useState<any>(defaultVisualTemplateModel);
   const [visualTemplatePickerMode, setVisualTemplatePickerMode] = useState<"create" | "open" | null>(null);
+  const [visualTemplateCreationTarget, setVisualTemplateCreationTarget] = useState<null | {
+    folderId: string;
+    fileName: string;
+    filePath: string;
+  }>(null);
+  const [visualTemplateSaveAsOpen, setVisualTemplateSaveAsOpen] = useState(false);
   const [visualTemplateUploadOpen, setVisualTemplateUploadOpen] = useState(false);
   const [visualTemplateImportOpen, setVisualTemplateImportOpen] = useState(false);
   const [visualTemplateSourceId, setVisualTemplateSourceId] = useState<string | null>(null);
   const [visualTemplateDropRegionId, setVisualTemplateDropRegionId] = useState<string | null>(null);
   const [visualTemplateSelectedRegionId, setVisualTemplateSelectedRegionId] = useState<string | null>("hero");
+  const [visualTemplateEditingRegionId, setVisualTemplateEditingRegionId] = useState<string | null>(null);
+  const [visualTemplateEditingLabel, setVisualTemplateEditingLabel] = useState("");
+  const [visualTemplateMoveModifierActive, setVisualTemplateMoveModifierActive] = useState(false);
+  const [visualTemplateLayerDragId, setVisualTemplateLayerDragId] = useState<string | null>(null);
+  const [visualTemplateDeleteDropActive, setVisualTemplateDeleteDropActive] = useState(false);
+  const [visualTemplateLayerSearch, setVisualTemplateLayerSearch] = useState("");
+  const [visualTemplateExpandedLayerIds, setVisualTemplateExpandedLayerIds] = useState<Set<string>>(() => new Set(["hero", "body", "sidebar"]));
+  const visualTemplatePreviewRef = useRef<HTMLDivElement | null>(null);
+  const [visualTemplateSmartGuides, setVisualTemplateSmartGuides] = useState<Array<{ axis: "x" | "y"; value: number; from: number; to: number; label?: string }>>([]);
+  const [visualTemplateMeasureMode, setVisualTemplateMeasureMode] = useState(false);
+  const [visualTemplateMeasurement, setVisualTemplateMeasurement] = useState<{
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    measuring: boolean;
+  } | null>(null);
+  const [visualTemplateLayoutDrag, setVisualTemplateLayoutDrag] = useState<{
+    id: string;
+    kind?: string;
+    mode: "move" | "resize";
+    handle?: VisualTemplateResizeHandle;
+    startX: number;
+    startY: number;
+    layout: Record<string, number>;
+  } | null>(null);
+  const visualTemplateModelRef = useRef<any>(defaultVisualTemplateModel);
+  const visualTemplateUndoStackRef = useRef<any[]>([]);
+  const visualTemplateRedoStackRef = useRef<any[]>([]);
+  const visualTemplateDragHistorySnapshotRef = useRef<any | null>(null);
+  const [visualTemplateHistoryVersion, setVisualTemplateHistoryVersion] = useState(0);
   const [tabDropTarget, setTabDropTarget] = useState(null);
   const [projectDropTarget, setProjectDropTarget] = useState(null);
   const [pinnedAuthoringSelection, setPinnedAuthoringSelection] = useState(null);
@@ -5788,6 +5963,68 @@ function App() {
     top: number;
     width: number;
   }>>([]);
+
+  useEffect(() => {
+    visualTemplateModelRef.current = visualTemplateModel;
+  }, [visualTemplateModel]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Control") setVisualTemplateMoveModifierActive(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Control") setVisualTemplateMoveModifierActive(false);
+    };
+    const handleBlur = () => setVisualTemplateMoveModifierActive(false);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!visualTemplateLayoutDrag) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings);
+      const dx = (event.clientX - visualTemplateLayoutDrag.startX) / gridSettings.zoom;
+      const dy = (event.clientY - visualTemplateLayoutDrag.startY) / gridSettings.zoom;
+      const startLayout = normalizeVisualTemplateLayout(visualTemplateLayoutDrag.layout);
+      const rawUpdates = visualTemplateLayoutDrag.mode === "resize"
+        ? getVisualTemplateResizeLayout(startLayout, dx, dy, visualTemplateLayoutDrag.handle || "se", visualTemplateLayoutDrag.kind)
+        : {
+            x: Math.max(0, Math.min(visualTemplatePageSize.width - startLayout.width, startLayout.x + dx)),
+            y: Math.max(0, Math.min(visualTemplatePageSize.height - startLayout.height, startLayout.y + dy)),
+          };
+      const snapped = resolveVisualTemplateSnappedLayout(
+        visualTemplateLayoutDrag.id,
+        { ...startLayout, ...rawUpdates },
+        visualTemplateLayoutDrag.mode,
+        gridSettings,
+        visualTemplateLayoutDrag.handle,
+      );
+      setVisualTemplateSmartGuides(snapped.guides);
+      updateVisualTemplateRegionLayout(visualTemplateLayoutDrag.id, snapped.layout, { recordHistory: false });
+    };
+
+    const handlePointerUp = () => {
+      commitVisualTemplateDragHistory();
+      setVisualTemplateLayoutDrag(null);
+      setVisualTemplateSmartGuides([]);
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [visualTemplateLayoutDrag, visualTemplateModel.gridSettings, visualTemplateModel.regions]);
   const fileInputRef = useRef(null);
   const caretRef = useRef(null);
   const contextSelectionRangeRef = useRef<Range | null>(null);
@@ -5814,6 +6051,7 @@ function App() {
   const lastSavedAuthoringProfilesRef = useRef("");
   const schemaProfileCacheRef = useRef<Record<string, DitaSchemaProfile>>({});
   const schemaProfileLoadingRef = useRef<Set<string>>(new Set());
+  const defaultExplorerSelectionRef = useRef(false);
   const pendingVisualEditRef = useRef<{
     fileId: string | null;
     path: number[];
@@ -5824,6 +6062,10 @@ function App() {
   const activeFile = findProjectNode(projectTree, activeFileId)?.node;
   const activeFileKind = getProjectFileKind(activeFile);
   const activeIsVisualTemplate = activeFileId === visualTemplatesTabId || activeFileKind === "visual-template";
+  const activeIsVisualTemplateBinding = activeIsVisualTemplate && (
+    activeFile?.ditaType === "visual-template-binding" ||
+    visualTemplateModel.artifactType === "binding"
+  );
   const activeIsTextEditable = isTextEditableFile(activeFile);
   const activeIsXml = activeFileKind === "xml";
   const activeFilePath = getProjectFilePath(projectTree, activeFileId);
@@ -6708,15 +6950,17 @@ function App() {
   };
   const renderedLeftPanel = activeLeftPanel || lastLeftPanel;
   const renderedSidePanel = activeSidePanel || lastSidePanel;
-  const visualTemplateSidePanels: SidePanelId[] = ["templateSources", "templateBindings", "templateStyle", "notifications"];
+  const visualTemplateSidePanels: SidePanelId[] = activeIsVisualTemplateBinding
+    ? ["templateSources", "templateBindings", "templateLayers", "templateLayout", "templateStyle", "notifications"]
+    : ["templateLayers", "templateLayout", "templateStyle", "notifications"];
   const defaultSidePanels: SidePanelId[] = ["inspector", "schema", "search", "chat", "aiReview", "github", "notifications", "help"];
   const visibleSidePanels = activeIsVisualTemplate ? visualTemplateSidePanels : defaultSidePanels;
 
   useEffect(() => {
     if (activeSidePanel && !visibleSidePanels.includes(activeSidePanel)) {
-      setActiveSidePanel(null);
+      setActiveSidePanel(activeIsVisualTemplate ? "templateLayers" : null);
     }
-  }, [activeIsVisualTemplate, activeSidePanel]);
+  }, [activeIsVisualTemplate, activeSidePanel, visibleSidePanels]);
 
   function filterIgnoredSpellingIssues(issues: SpellingIssue[]) {
     return issues.filter((issue) => !ignoredSpellingIssueIdsRef.current.has(issue.id));
@@ -6963,6 +7207,16 @@ function App() {
   }, [appAccountStatus, isAuthenticated]);
 
   useEffect(() => {
+    if (selectedProjectId || defaultExplorerSelectionRef.current) return;
+
+    const contentFolder = findProjectFolderByPath(projectTree, "content");
+    if (!contentFolder) return;
+
+    defaultExplorerSelectionRef.current = true;
+    setSelectedProjectId(contentFolder.node.id);
+  }, [projectTree, selectedProjectId]);
+
+  useEffect(() => {
     if (!isAuthenticated || githubStatusState !== "ready") return;
     if (githubStatus?.selectedRepository || workspaceSource !== "loading") return;
 
@@ -6986,7 +7240,12 @@ function App() {
 
   useEffect(() => {
     function handleUndoRedoShortcut(event: KeyboardEvent) {
-      if (!activeIsTextEditable || event.key.toLowerCase() !== "z" || (!event.metaKey && !event.ctrlKey) || event.altKey) {
+      if (
+        (!activeIsVisualTemplate && !activeIsTextEditable) ||
+        event.key.toLowerCase() !== "z" ||
+        (!event.metaKey && !event.ctrlKey) ||
+        event.altKey
+      ) {
         return;
       }
 
@@ -7005,6 +7264,15 @@ function App() {
 
       event.preventDefault();
       event.stopPropagation();
+      if (activeIsVisualTemplate) {
+        if (event.shiftKey) {
+          redoVisualTemplateChange();
+        } else {
+          undoVisualTemplateChange();
+        }
+        return;
+      }
+
       if (event.shiftKey) {
         runRedo();
       } else {
@@ -7014,7 +7282,7 @@ function App() {
 
     document.addEventListener("keydown", handleUndoRedoShortcut, true);
     return () => document.removeEventListener("keydown", handleUndoRedoShortcut, true);
-  }, [activeIsTextEditable, activeFileId, xml, canRedo]);
+  }, [activeIsTextEditable, activeIsVisualTemplate, activeFileId, xml, canRedo, visualTemplateHistoryVersion]);
 
   useEffect(() => {
     if (activeLeftPanel !== "git" || !githubStatus?.selectedRepository) return;
@@ -8405,11 +8673,12 @@ function App() {
 
     if (fileKind === "visual-template") {
       const model = parseVisualTemplateModel(file.content || "");
-      setVisualTemplateModel({
+      loadVisualTemplateModel({
         ...model,
+        artifactType: file.ditaType === "visual-template-binding" ? "binding" : model.artifactType,
         filePath: file.githubPath || getProjectFilePath(projectTree, file.id) || model.filePath || "",
       });
-      setExplorerSystemMessage(`Opened template binding ${file.name}`, "info", { open: false });
+      setExplorerSystemMessage(`Opened visual template ${file.name}`, "info", { open: false });
       return;
     }
 
@@ -8793,8 +9062,19 @@ function App() {
 
     const fileName = makeUniqueName(normalizeFileName(getDefaultFileStem(typeKey), typeKey), folder.children);
     const fileType = typeKey;
-    const isImageFile = fileType === "image";
     const githubPath = getGitHubChildPath(folder, fileName);
+    if (fileType === "visual-template") {
+      setVisualTemplateCreationTarget({
+        folderId: folder.id,
+        fileName,
+        filePath: githubPath || fileName,
+      });
+      setVisualTemplatePickerMode("create");
+      setFileTypePicker(null);
+      return;
+    }
+
+    const isImageFile = fileType === "image";
     const fileNode = {
       id: `file-${Date.now().toString(36)}`,
       type: "file",
@@ -8821,6 +9101,12 @@ function App() {
     setSelectedProjectId(fileNode.id);
     setEditingProjectNodeId(fileNode.id);
     loadXmlIntoEditor(fileNode.content || "", fileNode.id);
+    if (fileType === "visual-template") {
+      loadVisualTemplateModel({
+        ...parseVisualTemplateModel(fileNode.content || ""),
+        filePath: githubPath || "",
+      });
+    }
     setFileTypePicker(null);
     setExplorerSystemMessage(`Created ${fileName}`);
 
@@ -8859,6 +9145,106 @@ function App() {
           setDraftSaveState({
             status: "error",
             message: error instanceof Error ? error.message : "Could not save new file draft.",
+          });
+        }
+      })();
+    }
+  }
+
+  function createExplorerVisualTemplateFile(template, target = visualTemplateCreationTarget) {
+    if (!target) return;
+
+    const folder = findProjectNode(projectTree, target.folderId)?.node;
+    if (!folder || folder.type !== "folder") return;
+
+    const templateName = target.fileName.replace(/\.[^./]+$/i, "").replace(/[-_]+/g, " ");
+    const templateId = `template-${slugifyWorkspaceArtifactName(templateName) || Date.now().toString(36)}`;
+    const nextModel = normalizeVisualTemplateModel({
+      ...defaultVisualTemplateModel,
+      artifactType: "template",
+      id: templateId,
+      name: templateName || template.name || "Visual template",
+      template: {
+        id: templateId,
+        name: templateName || template.name || "Visual template",
+        source: template.source || "workspace",
+      },
+      filePath: target.filePath,
+      regions: template.regions || [],
+    });
+    const content = JSON.stringify(nextModel, null, 2);
+    const fileNode = {
+      id: `file-${Date.now().toString(36)}`,
+      type: "file",
+      name: target.fileName,
+      ditaType: "visual-template",
+      content,
+      checkedInAt: "Not checked in",
+      githubPath: target.filePath || undefined,
+      githubSha: target.filePath ? "" : undefined,
+      githubLoaded: Boolean(target.filePath),
+    };
+
+    setProjectTree((tree) => updateProjectNode(tree, folder.id, (node) => ({
+      ...node,
+      children: [...node.children, fileNode],
+    })));
+    setFileHistories((current) => ({
+      ...current,
+      [fileNode.id]: {
+        past: [],
+        present: content,
+        future: [],
+      },
+    }));
+    setTabPanes((panes) => panes.map((pane) => (
+      pane.id === activePaneId
+        ? { ...pane, tabs: [...pane.tabs, fileNode.id], activeFileId: fileNode.id }
+        : pane
+    )));
+    setActiveFileId(fileNode.id);
+    setSelectedProjectId(fileNode.id);
+    setEditingProjectNodeId(fileNode.id);
+    loadVisualTemplateModel(nextModel);
+    setVisualTemplateSourceId(null);
+    setVisualTemplateCreationTarget(null);
+    setFileTypePicker(null);
+    setExplorerSystemMessage(`Created ${target.fileName}`);
+
+    if (isAuthenticated && fileNode.githubPath) {
+      void (async () => {
+        try {
+          const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+            method: "PUT",
+            headers: {
+              ...(await getBackendAuthHeaders()),
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              filePath: fileNode.githubPath,
+              githubSha: "",
+              sourceContentHash: "",
+              contentFormat: "visual-template",
+              content,
+            }),
+          });
+          const body = await response.json();
+
+          if (!response.ok) {
+            throw new Error(body.error || "Could not save visual template draft.");
+          }
+
+          setProjectTree((currentTree) => updateProjectNode(currentTree, fileNode.id, (node) => ({
+            ...node,
+            draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+            draftDirty: Boolean(body.draft?.dirty),
+            draftContentHash: body.draft?.draft_content_hash || node.draftContentHash || "",
+            sourceContentHash: body.draft?.source_content_hash || node.sourceContentHash || "",
+          })));
+        } catch (error) {
+          setDraftSaveState({
+            status: "error",
+            message: error instanceof Error ? error.message : "Could not save visual template draft.",
           });
         }
       })();
@@ -10661,7 +11047,7 @@ function App() {
     } else if (command === "visualTemplates") {
       openVisualTemplatesTab();
     } else if (command === "createVisualTemplate") {
-      createNewVisualTemplateBinding();
+      setVisualTemplatePickerMode("create");
     } else if (command === "openVisualTemplate") {
       setVisualTemplatePickerMode("open");
     } else if (command === "uploadVisualTemplate") {
@@ -10785,7 +11171,7 @@ function App() {
       templates.push({
         id: currentTemplate.id,
         name: currentTemplate.name || "Current template",
-        description: "Template currently loaded in the binding workbench.",
+        description: "Template currently loaded in the designer.",
         source: currentTemplate.source || "current",
         regions: visualTemplateModel.regions,
       });
@@ -10796,6 +11182,7 @@ function App() {
   function startTemplateBindingFromTemplate(template) {
     const nextModel = normalizeVisualTemplateModel({
       ...defaultVisualTemplateModel,
+      artifactType: "binding",
       id: `binding-${slugifySpecializationName(template.name || template.id || "template") || Date.now().toString(36)}`,
       name: `Binding - ${template.name || "Template"}`,
       template: {
@@ -10812,17 +11199,36 @@ function App() {
         sourcePath: undefined,
       })),
     });
-    setVisualTemplateModel(nextModel);
+    loadVisualTemplateModel(nextModel);
+    setVisualTemplateSourceId(null);
+    openVisualTemplatesTab(nextModel);
+  }
+
+  function startVisualTemplateDesigner(template) {
+    const nextModel = normalizeVisualTemplateModel({
+      ...defaultVisualTemplateModel,
+      artifactType: "template",
+      id: template.id,
+      name: template.name || "Visual template",
+      template: {
+        id: template.id,
+        name: template.name || "Visual template",
+        source: template.source || "template",
+      },
+      filePath: template.filePath || "",
+      regions: template.regions || defaultVisualTemplateModel.regions,
+    });
+    loadVisualTemplateModel(nextModel);
     setVisualTemplateSourceId(null);
     openVisualTemplatesTab(nextModel);
   }
 
   function createNewVisualTemplateBinding() {
     const templateName = `New template ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-    startTemplateBindingFromTemplate({
+    startVisualTemplateDesigner({
       id: `template-${Date.now().toString(36)}`,
       name: templateName,
-      description: "New template definition. The first version uses the default container structure until the template designer is expanded.",
+      description: "New reusable template definition. Arrange containers and slots, then save it for later bindings.",
       source: "new",
       regions: defaultVisualTemplateModel.regions,
     });
@@ -10841,14 +11247,14 @@ function App() {
         },
         filePath: "",
       });
-      startTemplateBindingFromTemplate({
+      startVisualTemplateDesigner({
         id: uploadedTemplate.template.id,
         name: uploadedTemplate.template.name,
         description: `Uploaded from ${file.name}.`,
         source: "uploaded",
         regions: uploadedTemplate.regions,
       });
-      appendTerminalMessage(`Uploaded template ${file.name}. Create bindings and save the binding document when ready.`, {
+      appendTerminalMessage(`Uploaded template ${file.name}. Edit containers and slots, then save the reusable template.`, {
         level: "info",
         source: "Templates",
         open: false,
@@ -10865,7 +11271,7 @@ function App() {
 
   function startImportedVisualTemplate(provider: "canva" | "figma") {
     const providerLabel = provider === "figma" ? "Figma" : "Canva";
-    startTemplateBindingFromTemplate({
+    startVisualTemplateDesigner({
       id: `${provider}-template-${Date.now().toString(36)}`,
       name: `${providerLabel} imported template`,
       description: `${providerLabel} import placeholder. Later this will connect to the provider and map frames/components to containers and slots.`,
@@ -12577,6 +12983,105 @@ function App() {
     return option?.label || binding || "Slot";
   }
 
+  function cloneVisualTemplateHistoryModel(model: any) {
+    return normalizeVisualTemplateModel(JSON.parse(JSON.stringify(model || defaultVisualTemplateModel)));
+  }
+
+  function getVisualTemplateHistorySignature(model: any) {
+    return JSON.stringify(normalizeVisualTemplateModel(model || defaultVisualTemplateModel));
+  }
+
+  function resetVisualTemplateHistory(nextModel = visualTemplateModelRef.current) {
+    visualTemplateUndoStackRef.current = [];
+    visualTemplateRedoStackRef.current = [];
+    visualTemplateDragHistorySnapshotRef.current = null;
+    visualTemplateModelRef.current = cloneVisualTemplateHistoryModel(nextModel);
+    setVisualTemplateHistoryVersion((version) => version + 1);
+  }
+
+  function loadVisualTemplateModel(nextModel: any) {
+    const normalizedModel = cloneVisualTemplateHistoryModel(nextModel);
+    visualTemplateModelRef.current = normalizedModel;
+    setVisualTemplateModel(normalizedModel);
+    resetVisualTemplateHistory(normalizedModel);
+  }
+
+  function applyVisualTemplateModelUpdate(
+    updater: any,
+    options: { recordHistory?: boolean } = {},
+  ) {
+    const recordHistory = options.recordHistory !== false;
+    setVisualTemplateModel((current) => {
+      const nextValue = typeof updater === "function" ? updater(current) : updater;
+      const nextModel = cloneVisualTemplateHistoryModel(nextValue);
+      if (getVisualTemplateHistorySignature(current) === getVisualTemplateHistorySignature(nextModel)) {
+        return current;
+      }
+
+      if (recordHistory) {
+        visualTemplateUndoStackRef.current = [
+          ...visualTemplateUndoStackRef.current.slice(-49),
+          cloneVisualTemplateHistoryModel(current),
+        ];
+        visualTemplateRedoStackRef.current = [];
+        setVisualTemplateHistoryVersion((version) => version + 1);
+      }
+
+      visualTemplateModelRef.current = nextModel;
+      return nextModel;
+    });
+  }
+
+  function keepVisualTemplateSelectionInModel(model: any) {
+    setVisualTemplateSelectedRegionId((selectedId) => {
+      if (selectedId && model.regions.some((region) => region.id === selectedId)) return selectedId;
+      return model.regions[0]?.id || null;
+    });
+  }
+
+  function undoVisualTemplateChange() {
+    const previousModel = visualTemplateUndoStackRef.current.pop();
+    if (!previousModel) return;
+    const currentModel = cloneVisualTemplateHistoryModel(visualTemplateModelRef.current);
+    visualTemplateRedoStackRef.current = [
+      ...visualTemplateRedoStackRef.current.slice(-49),
+      currentModel,
+    ];
+    const normalizedPrevious = cloneVisualTemplateHistoryModel(previousModel);
+    visualTemplateModelRef.current = normalizedPrevious;
+    setVisualTemplateModel(normalizedPrevious);
+    keepVisualTemplateSelectionInModel(normalizedPrevious);
+    setVisualTemplateHistoryVersion((version) => version + 1);
+  }
+
+  function redoVisualTemplateChange() {
+    const nextModel = visualTemplateRedoStackRef.current.pop();
+    if (!nextModel) return;
+    const currentModel = cloneVisualTemplateHistoryModel(visualTemplateModelRef.current);
+    visualTemplateUndoStackRef.current = [
+      ...visualTemplateUndoStackRef.current.slice(-49),
+      currentModel,
+    ];
+    const normalizedNext = cloneVisualTemplateHistoryModel(nextModel);
+    visualTemplateModelRef.current = normalizedNext;
+    setVisualTemplateModel(normalizedNext);
+    keepVisualTemplateSelectionInModel(normalizedNext);
+    setVisualTemplateHistoryVersion((version) => version + 1);
+  }
+
+  function commitVisualTemplateDragHistory() {
+    const snapshot = visualTemplateDragHistorySnapshotRef.current;
+    visualTemplateDragHistorySnapshotRef.current = null;
+    if (!snapshot) return;
+    if (getVisualTemplateHistorySignature(snapshot) === getVisualTemplateHistorySignature(visualTemplateModelRef.current)) return;
+    visualTemplateUndoStackRef.current = [
+      ...visualTemplateUndoStackRef.current.slice(-49),
+      cloneVisualTemplateHistoryModel(snapshot),
+    ];
+    visualTemplateRedoStackRef.current = [];
+    setVisualTemplateHistoryVersion((version) => version + 1);
+  }
+
   function setVisualTemplateRegionSource(regionId: string, sourceId: string) {
     if (!sourceId) {
       resetVisualTemplateRegion(regionId);
@@ -12595,7 +13100,7 @@ function App() {
   }
 
   function updateVisualTemplateRegion(regionId: string, updates: Record<string, any>) {
-    setVisualTemplateModel((current) => ({
+    applyVisualTemplateModelUpdate((current) => ({
       ...current,
       regions: current.regions.map((region) => (
         region.id === regionId ? { ...region, ...updates } : region
@@ -12603,8 +13108,51 @@ function App() {
     }));
   }
 
+  function startEditingVisualTemplateRegionLabel(region: any) {
+    setVisualTemplateSelectedRegionId(region.id);
+    setVisualTemplateEditingRegionId(region.id);
+    setVisualTemplateEditingLabel(region.label || (region.kind === "slot" ? "Slot" : "Container"));
+  }
+
+  function commitVisualTemplateRegionLabel() {
+    if (!visualTemplateEditingRegionId) return;
+    const region = visualTemplateModel.regions.find((item) => item.id === visualTemplateEditingRegionId);
+    const fallbackLabel = region?.kind === "slot" ? "Slot" : "Container";
+    const nextLabel = visualTemplateEditingLabel.trim() || fallbackLabel;
+    updateVisualTemplateRegion(visualTemplateEditingRegionId, { label: nextLabel });
+    setVisualTemplateEditingRegionId(null);
+    setVisualTemplateEditingLabel("");
+  }
+
+  function cancelVisualTemplateRegionLabelEdit() {
+    setVisualTemplateEditingRegionId(null);
+    setVisualTemplateEditingLabel("");
+  }
+
+  function updateVisualTemplateRegionLayout(
+    regionId: string,
+    updates: Record<string, any>,
+    options: { recordHistory?: boolean } = {},
+  ) {
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((region) => (
+        region.id === regionId
+          ? {
+              ...region,
+              layout: {
+                ...visualTemplateStyleDefaults.layout,
+                ...(region.layout || {}),
+                ...updates,
+              },
+            }
+          : region
+      )),
+    }), options);
+  }
+
   function updateVisualTemplateRegionStyle(regionId: string, styleKey: "style" | "textStyle", updates: Record<string, any>) {
-    setVisualTemplateModel((current) => ({
+    applyVisualTemplateModelUpdate((current) => ({
       ...current,
       regions: current.regions.map((region) => (
         region.id === regionId
@@ -12619,6 +13167,149 @@ function App() {
           : region
       )),
     }));
+  }
+
+  function updateVisualTemplateRegionMeta(regionId: string, updates: Record<string, any>) {
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((region) => (
+        region.id === regionId ? { ...region, ...updates } : region
+      )),
+    }));
+  }
+
+  function getVisualTemplateLayerRows() {
+    const childrenByParent = new Map<string, any[]>();
+    visualTemplateModel.regions.forEach((region) => {
+      const parentId = region.parentId || "";
+      const children = childrenByParent.get(parentId) || [];
+      children.push(region);
+      childrenByParent.set(parentId, children);
+    });
+    const sortByLayer = (items: any[]) => [...items].sort((a, b) => (
+      normalizeVisualTemplateLayout(b.layout).zIndex - normalizeVisualTemplateLayout(a.layout).zIndex ||
+      String(a.label || a.id).localeCompare(String(b.label || b.id))
+    ));
+    const rows: Array<{ region: any; depth: number }> = [];
+    const visit = (parentId = "", depth = 0) => {
+      sortByLayer(childrenByParent.get(parentId) || []).forEach((region) => {
+        rows.push({ region, depth });
+        visit(region.id, depth + 1);
+      });
+    };
+    visit();
+    return rows;
+  }
+
+  function getVisualTemplateLayerTreeRows() {
+    const childrenByParent = new Map<string, any[]>();
+    visualTemplateModel.regions.forEach((region) => {
+      const parentId = region.parentId || "";
+      const children = childrenByParent.get(parentId) || [];
+      children.push(region);
+      childrenByParent.set(parentId, children);
+    });
+    const sortByLayer = (items: any[]) => [...items].sort((a, b) => (
+      normalizeVisualTemplateLayout(b.layout).zIndex - normalizeVisualTemplateLayout(a.layout).zIndex ||
+      String(a.label || a.id).localeCompare(String(b.label || b.id))
+    ));
+    const query = visualTemplateLayerSearch.trim().toLowerCase();
+    const matches = (region: any) => !query || String(region.label || region.id || "").toLowerCase().includes(query);
+    const descendantMatches = (region: any): boolean => matches(region) || (childrenByParent.get(region.id) || []).some(descendantMatches);
+    const rows: Array<{ region: any; depth: number; hasChildren: boolean; expanded: boolean }> = [];
+    const visit = (parentId = "", depth = 0) => {
+      sortByLayer(childrenByParent.get(parentId) || []).forEach((region) => {
+        if (query && !descendantMatches(region)) return;
+        const hasChildren = Boolean((childrenByParent.get(region.id) || []).length);
+        const expanded = query ? true : visualTemplateExpandedLayerIds.has(region.id);
+        rows.push({ region, depth, hasChildren, expanded });
+        if (hasChildren && expanded) visit(region.id, depth + 1);
+      });
+    };
+    visit();
+    return rows;
+  }
+
+  function toggleVisualTemplateLayerExpanded(regionId: string) {
+    setVisualTemplateExpandedLayerIds((current) => {
+      const next = new Set(current);
+      if (next.has(regionId)) {
+        next.delete(regionId);
+      } else {
+        next.add(regionId);
+      }
+      return next;
+    });
+  }
+
+  function moveVisualTemplateLayer(regionId: string, direction: "up" | "down") {
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    if (!region) return;
+    const siblings = visualTemplateModel.regions
+      .filter((item) => (item.parentId || "") === (region.parentId || ""))
+      .sort((a, b) => normalizeVisualTemplateLayout(b.layout).zIndex - normalizeVisualTemplateLayout(a.layout).zIndex);
+    const currentIndex = siblings.findIndex((item) => item.id === regionId);
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
+    const target = siblings[targetIndex];
+    const currentLayer = normalizeVisualTemplateLayout(region.layout).zIndex;
+    const targetLayer = normalizeVisualTemplateLayout(target.layout).zIndex;
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((item) => {
+        if (item.id === region.id) {
+          return { ...item, layout: { ...normalizeVisualTemplateLayout(item.layout), zIndex: targetLayer } };
+        }
+        if (item.id === target.id) {
+          return { ...item, layout: { ...normalizeVisualTemplateLayout(item.layout), zIndex: currentLayer } };
+        }
+        return item;
+      }),
+    }));
+  }
+
+  function reorderVisualTemplateLayer(dragRegionId: string | null, targetRegionId: string) {
+    if (!dragRegionId || dragRegionId === targetRegionId) return;
+    const dragged = visualTemplateModel.regions.find((region) => region.id === dragRegionId);
+    const target = visualTemplateModel.regions.find((region) => region.id === targetRegionId);
+    if (!dragged || !target || (dragged.parentId || "") !== (target.parentId || "")) return;
+    const draggedLayer = normalizeVisualTemplateLayout(dragged.layout).zIndex;
+    const targetLayer = normalizeVisualTemplateLayout(target.layout).zIndex;
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((region) => {
+        if (region.id === dragged.id) {
+          return { ...region, layout: { ...normalizeVisualTemplateLayout(region.layout), zIndex: targetLayer } };
+        }
+        if (region.id === target.id) {
+          return { ...region, layout: { ...normalizeVisualTemplateLayout(region.layout), zIndex: draggedLayer } };
+        }
+        return region;
+      }),
+    }));
+    setVisualTemplateSelectedRegionId(dragged.id);
+  }
+
+  function updateVisualTemplateGridSettings(updates: Record<string, any>) {
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      gridSettings: normalizeVisualTemplateGridSettings({
+        ...(current.gridSettings || visualTemplateGridDefaults),
+        ...updates,
+      }),
+    }));
+  }
+
+  function getVisualTemplateLayoutStyle(region: any): React.CSSProperties {
+    const layout = normalizeVisualTemplateLayout(region?.layout);
+    return {
+      height: layout.height,
+      left: layout.x,
+      position: "absolute",
+      top: layout.y,
+      width: layout.width,
+      zIndex: layout.zIndex,
+    };
   }
 
   function getVisualTemplateCssStyle(region: any): React.CSSProperties {
@@ -12669,7 +13360,9 @@ function App() {
       borderStyle: style.borderWidth === 0 ? "none" : "dashed",
       borderWidth: Number.isFinite(Number(style.borderWidth)) ? Number(style.borderWidth) : undefined,
       boxShadow: shadowValue,
-      minHeight: Number.isFinite(Number(style.minHeight)) ? Number(style.minHeight) : undefined,
+      minHeight: region?.kind === "slot"
+        ? undefined
+        : Number.isFinite(Number(style.minHeight)) ? Number(style.minHeight) : undefined,
       padding: Number.isFinite(Number(style.padding)) ? Number(style.padding) : undefined,
       textAlign: region?.textStyle?.textAlign || undefined,
     };
@@ -12688,11 +13381,433 @@ function App() {
   function selectVisualTemplateRegion(event: React.MouseEvent<HTMLElement>, regionId: string) {
     event.stopPropagation();
     setVisualTemplateSelectedRegionId(regionId);
-    setActiveSidePanel("templateStyle");
+  }
+
+  function getVisualTemplateSnapPeers(regionId: string) {
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    return visualTemplateModel.regions.filter((item) => (
+      item.id !== regionId &&
+      (item.parentId || "") === (region?.parentId || "")
+    ));
+  }
+
+  function snapVisualTemplateNumber(value: number, target: number, threshold: number) {
+    return Math.abs(value - target) <= threshold ? target : value;
+  }
+
+  function getVisualTemplateResizeLayout(
+    startLayout: Record<string, number>,
+    dx: number,
+    dy: number,
+    handle: VisualTemplateResizeHandle,
+    regionKind?: string,
+  ) {
+    const layout = normalizeVisualTemplateLayout(startLayout);
+    const minWidth = regionKind === "slot" ? 24 : 40;
+    const minHeight = regionKind === "slot" ? 18 : 24;
+    const startRight = layout.x + layout.width;
+    const startBottom = layout.y + layout.height;
+    let nextX = layout.x;
+    let nextY = layout.y;
+    let nextWidth = layout.width;
+    let nextHeight = layout.height;
+
+    if (handle.includes("e")) {
+      nextWidth = Math.max(minWidth, Math.min(visualTemplatePageSize.width - layout.x, layout.width + dx));
+    }
+    if (handle.includes("s")) {
+      nextHeight = Math.max(minHeight, Math.min(visualTemplatePageSize.height - layout.y, layout.height + dy));
+    }
+    if (handle.includes("w")) {
+      nextX = Math.max(0, Math.min(startRight - minWidth, layout.x + dx));
+      nextWidth = startRight - nextX;
+    }
+    if (handle.includes("n")) {
+      nextY = Math.max(0, Math.min(startBottom - minHeight, layout.y + dy));
+      nextHeight = startBottom - nextY;
+    }
+
+    return {
+      x: nextX,
+      y: nextY,
+      width: nextWidth,
+      height: nextHeight,
+    };
+  }
+
+  function resolveVisualTemplateSnappedLayout(
+    regionId: string,
+    rawLayout: Record<string, number>,
+    mode: "move" | "resize",
+    gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings),
+    resizeHandle: VisualTemplateResizeHandle = "se",
+  ) {
+    let layout = normalizeVisualTemplateLayout(rawLayout);
+    const guides: Array<{ axis: "x" | "y"; value: number; from: number; to: number; label?: string }> = [];
+    const threshold = Number(gridSettings.snapThreshold || 4);
+
+    if (gridSettings.snapToGrid) {
+      const gridSize = Number(gridSettings.gridSize || 16);
+      const snapGrid = (value: number) => Math.round(value / gridSize) * gridSize;
+      if (mode === "resize") {
+        const right = layout.x + layout.width;
+        const bottom = layout.y + layout.height;
+        const snappedLeft = snapVisualTemplateNumber(layout.x, snapGrid(layout.x), threshold);
+        const snappedTop = snapVisualTemplateNumber(layout.y, snapGrid(layout.y), threshold);
+        const snappedRight = snapVisualTemplateNumber(right, snapGrid(right), threshold);
+        const snappedBottom = snapVisualTemplateNumber(bottom, snapGrid(bottom), threshold);
+        const left = resizeHandle.includes("w") ? snappedLeft : layout.x;
+        const top = resizeHandle.includes("n") ? snappedTop : layout.y;
+        layout = {
+          ...layout,
+          x: left,
+          y: top,
+          width: Math.max(40, (resizeHandle.includes("e") ? snappedRight : right) - left),
+          height: Math.max(24, (resizeHandle.includes("s") ? snappedBottom : bottom) - top),
+        };
+      } else {
+        layout = {
+          ...layout,
+          x: snapVisualTemplateNumber(layout.x, snapGrid(layout.x), threshold),
+          y: snapVisualTemplateNumber(layout.y, snapGrid(layout.y), threshold),
+        };
+      }
+    }
+
+    if (gridSettings.snapToObjects) {
+      const currentEdges = () => ({
+        left: layout.x,
+        right: layout.x + layout.width,
+        centerX: layout.x + layout.width / 2,
+        top: layout.y,
+        bottom: layout.y + layout.height,
+        centerY: layout.y + layout.height / 2,
+      });
+      const xCandidates = [
+        { kind: "left", value: 0 },
+        { kind: "centerX", value: visualTemplatePageSize.width / 2 },
+        { kind: "right", value: visualTemplatePageSize.width },
+      ];
+      const yCandidates = [
+        { kind: "top", value: 0 },
+        { kind: "centerY", value: visualTemplatePageSize.height / 2 },
+        { kind: "bottom", value: visualTemplatePageSize.height },
+      ];
+
+      for (const peer of getVisualTemplateSnapPeers(regionId)) {
+        const peerLayout = normalizeVisualTemplateLayout(peer.layout);
+        xCandidates.push(
+          { kind: "left", value: peerLayout.x },
+          { kind: "centerX", value: peerLayout.x + peerLayout.width / 2 },
+          { kind: "right", value: peerLayout.x + peerLayout.width },
+        );
+        yCandidates.push(
+          { kind: "top", value: peerLayout.y },
+          { kind: "centerY", value: peerLayout.y + peerLayout.height / 2 },
+          { kind: "bottom", value: peerLayout.y + peerLayout.height },
+        );
+      }
+
+      const snapAxis = (axis: "x" | "y", candidates: Array<{ kind: string; value: number }>) => {
+        const edges = currentEdges();
+        const edgeKeys = axis === "x"
+          ? mode === "resize"
+            ? [
+                ...(resizeHandle.includes("w") ? ["left"] : []),
+                ...(resizeHandle.includes("e") ? ["right"] : []),
+              ]
+            : ["left", "centerX", "right"]
+          : mode === "resize"
+            ? [
+                ...(resizeHandle.includes("n") ? ["top"] : []),
+                ...(resizeHandle.includes("s") ? ["bottom"] : []),
+              ]
+            : ["top", "centerY", "bottom"];
+        for (const edgeKey of edgeKeys) {
+          const edgeValue = edges[edgeKey];
+          const match = candidates.find((candidate) => Math.abs(edgeValue - candidate.value) <= threshold);
+          if (!match) continue;
+          if (axis === "x") {
+            if (mode === "resize" && edgeKey === "right") {
+              layout = { ...layout, width: Math.max(40, match.value - layout.x) };
+            } else if (mode === "resize" && edgeKey === "left") {
+              const right = layout.x + layout.width;
+              layout = { ...layout, x: Math.max(0, Math.min(right - 40, match.value)), width: Math.max(40, right - match.value) };
+            } else if (mode !== "resize") {
+              const offset = edgeKey === "left" ? 0 : edgeKey === "centerX" ? layout.width / 2 : layout.width;
+              layout = { ...layout, x: Math.max(0, Math.min(visualTemplatePageSize.width - layout.width, match.value - offset)) };
+            }
+            guides.push({ axis: "x", value: match.value, from: 0, to: visualTemplatePageSize.height, label: match.kind });
+          } else {
+            if (mode === "resize" && edgeKey === "bottom") {
+              layout = { ...layout, height: Math.max(24, match.value - layout.y) };
+            } else if (mode === "resize" && edgeKey === "top") {
+              const bottom = layout.y + layout.height;
+              layout = { ...layout, y: Math.max(0, Math.min(bottom - 24, match.value)), height: Math.max(24, bottom - match.value) };
+            } else if (mode !== "resize") {
+              const offset = edgeKey === "top" ? 0 : edgeKey === "centerY" ? layout.height / 2 : layout.height;
+              layout = { ...layout, y: Math.max(0, Math.min(visualTemplatePageSize.height - layout.height, match.value - offset)) };
+            }
+            guides.push({ axis: "y", value: match.value, from: 0, to: visualTemplatePageSize.width, label: match.kind });
+          }
+          break;
+        }
+      };
+
+      snapAxis("x", xCandidates);
+      snapAxis("y", yCandidates);
+    }
+
+    layout = {
+      ...layout,
+      x: Math.max(0, Math.min(visualTemplatePageSize.width - layout.width, layout.x)),
+      y: Math.max(0, Math.min(visualTemplatePageSize.height - layout.height, layout.y)),
+      width: Math.max(40, Math.min(visualTemplatePageSize.width - layout.x, layout.width)),
+      height: Math.max(24, Math.min(visualTemplatePageSize.height - layout.y, layout.height)),
+    };
+
+    return { layout, guides: guides.slice(0, 4) };
+  }
+
+  function alignVisualTemplateSelection(alignment: "left" | "center" | "right" | "top" | "middle" | "bottom") {
+    const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
+    if (!selectedRegion) return;
+    const layout = normalizeVisualTemplateLayout(selectedRegion.layout);
+    const updates: Record<string, number> = {};
+    if (alignment === "left") updates.x = 0;
+    if (alignment === "center") updates.x = Math.round((visualTemplatePageSize.width - layout.width) / 2);
+    if (alignment === "right") updates.x = visualTemplatePageSize.width - layout.width;
+    if (alignment === "top") updates.y = 0;
+    if (alignment === "middle") updates.y = Math.round((visualTemplatePageSize.height - layout.height) / 2);
+    if (alignment === "bottom") updates.y = visualTemplatePageSize.height - layout.height;
+    updateVisualTemplateRegionLayout(selectedRegion.id, updates);
+  }
+
+  function distributeVisualTemplateRegions(direction: "horizontal" | "vertical") {
+    const regions = visualTemplateModel.regions
+      .filter((region) => !region.parentId)
+      .map((region) => ({ region, layout: normalizeVisualTemplateLayout(region.layout) }));
+    if (regions.length < 3) return;
+
+    const sorted = [...regions].sort((a, b) => (
+      direction === "horizontal" ? a.layout.x - b.layout.x : a.layout.y - b.layout.y
+    ));
+    const first = sorted[0].layout;
+    const last = sorted[sorted.length - 1].layout;
+    const totalSize = sorted.reduce((sum, item) => sum + (direction === "horizontal" ? item.layout.width : item.layout.height), 0);
+    const available = direction === "horizontal"
+      ? last.x + last.width - first.x - totalSize
+      : last.y + last.height - first.y - totalSize;
+    const gap = Math.max(0, available / (sorted.length - 1));
+
+    let cursor = direction === "horizontal" ? first.x : first.y;
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((region) => {
+        const sortedItem = sorted.find((item) => item.region.id === region.id);
+        if (!sortedItem) return region;
+        const nextLayout = {
+          ...normalizeVisualTemplateLayout(region.layout),
+          [direction === "horizontal" ? "x" : "y"]: Math.round(cursor),
+        };
+        cursor += (direction === "horizontal" ? sortedItem.layout.width : sortedItem.layout.height) + gap;
+        return { ...region, layout: nextLayout };
+      }),
+    }));
+  }
+
+  function getVisualTemplateCanvasPoint(event: React.PointerEvent<HTMLElement> | React.MouseEvent<HTMLElement>) {
+    const preview = visualTemplatePreviewRef.current;
+    const gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings);
+    const rect = preview?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: Math.max(0, Math.min(visualTemplatePageSize.width, (event.clientX - rect.left) / gridSettings.zoom)),
+      y: Math.max(0, Math.min(visualTemplatePageSize.height, (event.clientY - rect.top) / gridSettings.zoom)),
+    };
+  }
+
+  function handleVisualTemplateMeasurePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!visualTemplateMeasureMode || event.target !== event.currentTarget) return;
+    const point = getVisualTemplateCanvasPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    setVisualTemplateMeasurement({ startX: point.x, startY: point.y, endX: point.x, endY: point.y, measuring: true });
+  }
+
+  function handleVisualTemplateMeasurePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!visualTemplateMeasurement?.measuring) return;
+    const point = getVisualTemplateCanvasPoint(event);
+    if (!point) return;
+    setVisualTemplateMeasurement((current) => (current ? { ...current, endX: point.x, endY: point.y } : current));
+  }
+
+  function handleVisualTemplateMeasurePointerUp() {
+    setVisualTemplateMeasurement((current) => (current ? { ...current, measuring: false } : current));
+  }
+
+  function startVisualTemplateLayoutDrag(
+    event: React.PointerEvent<HTMLElement>,
+    region: any,
+    mode: "move" | "resize",
+    handle?: VisualTemplateResizeHandle,
+  ) {
+    if (region.locked) {
+      event.stopPropagation();
+      setVisualTemplateSelectedRegionId(region.id);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setVisualTemplateSelectedRegionId(region.id);
+    visualTemplateDragHistorySnapshotRef.current = cloneVisualTemplateHistoryModel(visualTemplateModelRef.current);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setVisualTemplateLayoutDrag({
+      id: region.id,
+      kind: region.kind,
+      mode,
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      layout: normalizeVisualTemplateLayout(region.layout),
+    });
+  }
+
+  function addVisualTemplateContainer() {
+    const customCount = visualTemplateModel.regions.filter((region) => String(region.id || "").startsWith("container-")).length + 1;
+    const id = `container-${Date.now()}`;
+    const offset = Math.min(120, customCount * 18);
+    const nextRegion = {
+      id,
+      label: `Container ${customCount}`,
+      kind: "container",
+      role: "custom",
+      binding: "bodyParagraphs",
+      notes: "Custom layout container.",
+      layout: {
+        x: 72 + offset,
+        y: 76 + offset,
+        width: 260,
+        height: 160,
+        zIndex: customCount + 2,
+      },
+      style: {
+        ...visualTemplateStyleDefaults.style,
+        backgroundColor: "#ffffff",
+        borderColor: "#9bbcf2",
+      },
+      textStyle: {
+        ...visualTemplateStyleDefaults.textStyle,
+      },
+    };
+
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: [...current.regions, nextRegion],
+    }));
+    setVisualTemplateSelectedRegionId(id);
+  }
+
+  function deleteVisualTemplateContainer(regionId = visualTemplateSelectedRegionId) {
+    if (!regionId) return;
+    applyVisualTemplateModelUpdate((current) => {
+      const idsToDelete = new Set([regionId]);
+      let foundChild = true;
+      while (foundChild) {
+        foundChild = false;
+        current.regions.forEach((region) => {
+          if (region.parentId && idsToDelete.has(region.parentId) && !idsToDelete.has(region.id)) {
+            idsToDelete.add(region.id);
+            foundChild = true;
+          }
+        });
+      }
+      return {
+        ...current,
+        regions: current.regions.filter((region) => !idsToDelete.has(region.id)),
+      };
+    });
+    setVisualTemplateSelectedRegionId((current) => {
+      if (!current) return null;
+      const selectedRegion = visualTemplateModel.regions.find((region) => region.id === current);
+      return current === regionId || selectedRegion?.parentId === regionId ? null : current;
+    });
+  }
+
+  function deleteDraggedVisualTemplateLayer() {
+    if (!visualTemplateLayerDragId) return;
+    deleteVisualTemplateContainer(visualTemplateLayerDragId);
+    setVisualTemplateLayerDragId(null);
+    setVisualTemplateDeleteDropActive(false);
+  }
+
+  function clearVisualTemplateCanvas() {
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: [],
+    }));
+    setVisualTemplateSelectedRegionId(null);
+  }
+
+  function addVisualTemplateSlot() {
+    const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
+    const parentRegion = selectedRegion?.kind === "slot"
+      ? visualTemplateModel.regions.find((region) => region.id === selectedRegion.parentId)
+      : selectedRegion;
+    const targetContainer = parentRegion?.kind === "container"
+      ? parentRegion
+      : visualTemplateModel.regions.find((region) => region.kind === "container" && !region.parentId);
+
+    if (!targetContainer) {
+      appendTerminalMessage("Add a container first, then add slots inside it.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    const slotCount = visualTemplateModel.regions.filter((region) => String(region.id || "").startsWith("slot-")).length + 1;
+    const id = `slot-${Date.now()}`;
+    const nextSlot = {
+      id,
+      label: `Slot ${slotCount}`,
+      kind: "slot",
+      parentId: targetContainer.id,
+      role: "custom",
+      binding: "bodyParagraphs",
+      notes: "Bindable slot inside a visual container.",
+      layout: {
+        x: 16,
+        y: 18 + Math.min(140, slotCount * 18),
+        width: Math.max(120, Math.min(220, normalizeVisualTemplateLayout(targetContainer.layout).width - 32)),
+        height: 56,
+        zIndex: slotCount + 4,
+      },
+      style: {
+        ...visualTemplateStyleDefaults.style,
+        backgroundColor: "#eef5ff",
+        borderColor: "#9bbcf2",
+        borderRadius: 6,
+        padding: 8,
+        minHeight: 48,
+      },
+      textStyle: {
+        ...visualTemplateStyleDefaults.textStyle,
+        color: "#2f5ea7",
+        fontWeight: 750,
+      },
+    };
+
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: [...current.regions, nextSlot],
+    }));
+    setVisualTemplateSelectedRegionId(id);
   }
 
   function resetVisualTemplateRegion(regionId: string) {
-    setVisualTemplateModel((current) => ({
+    applyVisualTemplateModelUpdate((current) => ({
       ...current,
       regions: current.regions.map((region) => {
         if (region.id !== regionId) return region;
@@ -12727,7 +13842,7 @@ function App() {
   }
 
   function removeVisualTemplateSource(source) {
-    setVisualTemplateModel((current) => ({
+    applyVisualTemplateModelUpdate((current) => ({
       ...current,
       regions: current.regions.map((region) => {
         const isRegionSource =
@@ -12781,6 +13896,7 @@ function App() {
   }
 
   function canDropVisualTemplateSource(event: React.DragEvent<HTMLElement>) {
+    if (visualTemplateModel.artifactType !== "binding") return false;
     return Array.from(event.dataTransfer.types).some((type) => (
       type === "application/x-xml-editor-project-node" || type === "application/x-dita-project-file"
     ));
@@ -12790,6 +13906,15 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     setVisualTemplateDropRegionId(null);
+
+    if (visualTemplateModel.artifactType !== "binding") {
+      appendTerminalMessage("Save the visual template first. DITA files are bound later in a separate template binding document.", {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
 
     const droppedSource = getDroppedVisualTemplateSource(event);
     if (!droppedSource) return;
@@ -12842,26 +13967,51 @@ function App() {
     setVisualTemplateDropRegionId(null);
   }
 
-  function getVisualTemplateDraftPath() {
+  function getVisualTemplateExistingPath() {
     const activeTemplatePath = activeFileKind === "visual-template" && activeFile?.githubPath
       ? activeFile.githubPath
       : "";
-    const existingPath = visualTemplateModel.filePath || activeTemplatePath;
-    if (existingPath) return normalizeProjectPath(existingPath);
-
-    const slug = slugifySpecializationName(visualTemplateModel.name || "template-binding") || "template-binding";
-    return `visual_template_bindings/${slug}.af-binding.json`;
+    return normalizeProjectPath(visualTemplateModel.filePath || activeTemplatePath || "");
   }
 
-  async function saveVisualTemplateDraft() {
-    const filePath = getVisualTemplateDraftPath();
+  function getVisualTemplateDraftPath(filePathOverride = "") {
+    if (filePathOverride) return normalizeProjectPath(filePathOverride);
+
+    const existingPath = getVisualTemplateExistingPath();
+    if (existingPath) return existingPath;
+
+    const isBinding = visualTemplateModel.artifactType === "binding";
+    const fallbackName = isBinding ? "template-binding" : "visual-template";
+    const slug = slugifySpecializationName(visualTemplateModel.name || fallbackName) || fallbackName;
+    return isBinding
+      ? `visual_template_bindings/${slug}.af-binding.json`
+      : `visual_templates/${slug}.af-template.json`;
+  }
+
+  function getSuggestedVisualTemplateFileName() {
+    const isBinding = visualTemplateModel.artifactType === "binding";
+    const fallbackName = isBinding ? "template-binding" : "visual-template";
+    const slug = slugifyWorkspaceArtifactName(visualTemplateModel.name || fallbackName) || fallbackName;
+    return normalizeFileName(slug, isBinding ? "visual-template-binding" : "visual-template");
+  }
+
+  async function saveVisualTemplateDraft(filePathOverride = "") {
+    const explicitPath = typeof filePathOverride === "string" ? filePathOverride : "";
+    const existingPath = getVisualTemplateExistingPath();
+    if (!explicitPath && !existingPath) {
+      setVisualTemplateSaveAsOpen(true);
+      return;
+    }
+
+    const shouldReplaceUntitledTemplateTab = activeFileId === visualTemplatesTabId;
+    const filePath = getVisualTemplateDraftPath(explicitPath);
     const nextModel = normalizeVisualTemplateModel({
       ...visualTemplateModel,
       filePath,
     });
     const content = JSON.stringify(nextModel, null, 2);
 
-    setVisualTemplateModel(nextModel);
+    applyVisualTemplateModelUpdate(nextModel, { recordHistory: false });
     setFileHistories((current) => ({
       ...current,
       [activeFileKind === "visual-template" && activeFileId ? activeFileId : visualTemplatesTabId]: {
@@ -12872,7 +14022,7 @@ function App() {
     }));
 
     if (!isAuthenticated) {
-      appendTerminalMessage("Sign in before saving template binding documents to the workspace.", {
+      appendTerminalMessage("Sign in before saving visual templates to the workspace.", {
         level: "warning",
         source: "Templates",
         open: false,
@@ -12891,17 +14041,17 @@ function App() {
           filePath,
           githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
           sourceContentHash: activeFileKind === "visual-template" ? activeFile?.sourceContentHash || "" : "",
-          contentFormat: "visual-template-binding",
+          contentFormat: nextModel.artifactType === "binding" ? "visual-template-binding" : "visual-template",
           content,
         }),
       });
       const body = await response.json();
 
       if (!response.ok) {
-        throw new Error(body.error || "Could not save template binding document.");
+        throw new Error(body.error || "Could not save visual template.");
       }
 
-      const savedFileName = filePath.split("/").pop() || "template-binding.af-binding.json";
+      const savedFileName = filePath.split("/").pop() || (nextModel.artifactType === "binding" ? "template-binding.af-binding.json" : "visual-template.af-template.json");
       const savedFileId = activeFileKind === "visual-template" && activeFileId
         ? activeFileId
         : `github-file-${filePath}`;
@@ -12916,7 +14066,7 @@ function App() {
       setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
         id: savedFileId,
         name: savedFileName,
-        ditaType: "visual-template-binding",
+        ditaType: nextModel.artifactType === "binding" ? "visual-template-binding" : "visual-template",
         content,
         githubPath: filePath,
         githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
@@ -12925,18 +14075,313 @@ function App() {
         draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
         draftDirty: Boolean(body.draft?.dirty),
       }));
-      appendTerminalMessage(`Saved template binding document to ${filePath}.`, {
+      if (shouldReplaceUntitledTemplateTab) {
+        setTabPanes((panes) => panes.map((pane) => {
+          const hasUntitledTemplate = pane.tabs.includes(visualTemplatesTabId);
+          if (!hasUntitledTemplate) return pane;
+          const nextTabs = pane.tabs
+            .map((tabId) => (tabId === visualTemplatesTabId ? savedFileId : tabId))
+            .filter((tabId, index, tabs) => tabs.indexOf(tabId) === index);
+          return {
+            ...pane,
+            tabs: nextTabs,
+            activeFileId: pane.activeFileId === visualTemplatesTabId ? savedFileId : pane.activeFileId,
+          };
+        }));
+        setActiveFileId(savedFileId);
+        setSelectedProjectId(savedFileId);
+      }
+      appendTerminalMessage(`Saved ${nextModel.artifactType === "binding" ? "template binding document" : "visual template"} to ${filePath}.`, {
         level: "info",
         source: "Templates",
         open: false,
       });
     } catch (error) {
-      appendTerminalMessage(error instanceof Error ? error.message : "Could not save template binding document.", {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not save visual template.", {
         level: "error",
         source: "Templates",
         open: false,
       });
     }
+  }
+
+  function renderVisualTemplateLayoutPanel() {
+    const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
+    const regionLayout = normalizeVisualTemplateLayout(selectedRegion?.layout);
+    const gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings);
+    const hasSelectedRegion = Boolean(selectedRegion);
+    const canDistribute = visualTemplateModel.regions.filter((region) => !region.parentId).length >= 3;
+
+    const updateLayout = (updates: Record<string, any>) => {
+      if (!selectedRegion) return;
+      updateVisualTemplateRegionLayout(selectedRegion.id, updates);
+    };
+
+    return (
+      <aside
+        className={`inspector side-panel visual-template-side-panel visual-template-layout-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+        aria-label="Template layout panel"
+        aria-hidden={activeSidePanel ? undefined : "true"}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <div className="visual-template-panel-header">
+          <div className="visual-template-panel-title">
+            <span>Layout</span>
+            {selectedRegion ? <strong>{selectedRegion.label}</strong> : <strong>None</strong>}
+          </div>
+          <div className="visual-template-panel-actions">
+            <button type="button" className="visual-template-panel-icon-button" title="Add container" aria-label="Add container" onClick={addVisualTemplateContainer}>
+              <PlusIcon />
+            </button>
+            <button type="button" className="visual-template-panel-icon-button" title="Close panel" aria-label="Close Layout panel" onClick={() => setActiveSidePanel(null)}>
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+        {selectedRegion ? (
+          <div className="visual-template-side-content visual-style-panel">
+            <section className="visual-style-section">
+              <header>
+                <strong>Selected item</strong>
+                <small>{selectedRegion.kind === "slot" ? "Slot inside a container" : "Visual container"}</small>
+              </header>
+              <label>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={String(selectedRegion.label || "")}
+                  onChange={(event) => updateVisualTemplateRegionMeta(selectedRegion.id, { label: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Role</span>
+                <select
+                  value={String(selectedRegion.role || "custom")}
+                  onChange={(event) => updateVisualTemplateRegionMeta(selectedRegion.id, { role: event.target.value })}
+                >
+                  <option value="headline">Hero</option>
+                  <option value="flow">Body</option>
+                  <option value="navigation">Sidebar</option>
+                  <option value="media">Media</option>
+                  <option value="footer">Footer</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                <span>Binding</span>
+                <select
+                  value={String(selectedRegion.binding || "bodyParagraphs")}
+                  onChange={(event) => updateVisualTemplateRegionMeta(selectedRegion.id, { binding: event.target.value })}
+                >
+                  {getVisualTemplateBindingOptions(getVisualTemplateRegionSource(selectedRegion)).map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}{option.hasValue === false ? " (empty)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Position and size</strong>
+                <small>Canvas coordinates</small>
+              </header>
+              <div className="visual-style-grid-two">
+                <label>
+                  <span>X</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={visualTemplatePageSize.width}
+                    value={Math.round(regionLayout.x)}
+                    onChange={(event) => updateLayout({ x: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span>Y</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={visualTemplatePageSize.height}
+                    value={Math.round(regionLayout.y)}
+                    onChange={(event) => updateLayout({ y: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span>W</span>
+                  <input
+                    type="number"
+                    min="40"
+                    max={visualTemplatePageSize.width}
+                    value={Math.round(regionLayout.width)}
+                    onChange={(event) => updateLayout({ width: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span>H</span>
+                  <input
+                    type="number"
+                    min="24"
+                    max={visualTemplatePageSize.height}
+                    value={Math.round(regionLayout.height)}
+                    onChange={(event) => updateLayout({ height: Number(event.target.value) })}
+                  />
+                </label>
+              </div>
+              <label>
+                <span>Layer</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={Math.round(regionLayout.zIndex)}
+                  onChange={(event) => updateLayout({ zIndex: Number(event.target.value) })}
+                />
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Grid and snap</strong>
+                <small>Precision layout controls</small>
+              </header>
+              <label className="visual-style-checkbox">
+                <input
+                  type="checkbox"
+                  checked={gridSettings.showGrid}
+                  onChange={(event) => updateVisualTemplateGridSettings({ showGrid: event.target.checked })}
+                />
+                <span>Show grid overlay</span>
+              </label>
+              <label>
+                <span>Grid size</span>
+                <select
+                  value={String(gridSettings.gridSize)}
+                  onChange={(event) => updateVisualTemplateGridSettings({ gridSize: Number(event.target.value) })}
+                >
+                  <option value="8">8 px</option>
+                  <option value="16">16 px</option>
+                  <option value="24">24 px</option>
+                </select>
+              </label>
+              <label className="visual-style-checkbox">
+                <input
+                  type="checkbox"
+                  checked={gridSettings.snapToGrid}
+                  onChange={(event) => updateVisualTemplateGridSettings({ snapToGrid: event.target.checked })}
+                />
+                <span>Snap to grid</span>
+              </label>
+              <label className="visual-style-checkbox">
+                <input
+                  type="checkbox"
+                  checked={gridSettings.snapToObjects}
+                  onChange={(event) => updateVisualTemplateGridSettings({ snapToObjects: event.target.checked })}
+                />
+                <span>Snap to objects</span>
+              </label>
+              <label>
+                <span>Threshold</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="16"
+                  value={gridSettings.snapThreshold}
+                  onChange={(event) => updateVisualTemplateGridSettings({ snapThreshold: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>Columns</span>
+                <select
+                  value={String(gridSettings.columnGuideCount)}
+                  onChange={(event) => updateVisualTemplateGridSettings({ columnGuideCount: Number(event.target.value) })}
+                >
+                  <option value="0">None</option>
+                  <option value="2">2 columns</option>
+                  <option value="3">3 columns</option>
+                  <option value="12">12 columns</option>
+                </select>
+              </label>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Alignment</strong>
+                <small>Align selected item or distribute containers</small>
+              </header>
+              <div className="visual-alignment-toolbar" aria-label="Alignment toolbar">
+                <button type="button" disabled={!hasSelectedRegion} title="Align left" onClick={() => alignVisualTemplateSelection("left")}>L</button>
+                <button type="button" disabled={!hasSelectedRegion} title="Align center" onClick={() => alignVisualTemplateSelection("center")}>C</button>
+                <button type="button" disabled={!hasSelectedRegion} title="Align right" onClick={() => alignVisualTemplateSelection("right")}>R</button>
+                <button type="button" disabled={!hasSelectedRegion} title="Align top" onClick={() => alignVisualTemplateSelection("top")}>T</button>
+                <button type="button" disabled={!hasSelectedRegion} title="Align middle" onClick={() => alignVisualTemplateSelection("middle")}>M</button>
+                <button type="button" disabled={!hasSelectedRegion} title="Align bottom" onClick={() => alignVisualTemplateSelection("bottom")}>B</button>
+                <button type="button" disabled={!canDistribute} title="Distribute horizontally" onClick={() => distributeVisualTemplateRegions("horizontal")}>H</button>
+                <button type="button" disabled={!canDistribute} title="Distribute vertically" onClick={() => distributeVisualTemplateRegions("vertical")}>V</button>
+              </div>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Canvas view</strong>
+                <small>Zoom and measurement</small>
+              </header>
+              <label>
+                <span>Zoom</span>
+                <select
+                  value={String(gridSettings.zoom)}
+                  onChange={(event) => updateVisualTemplateGridSettings({ zoom: Number(event.target.value) })}
+                >
+                  <option value="0.25">25%</option>
+                  <option value="0.5">50%</option>
+                  <option value="0.75">75%</option>
+                  <option value="1">100%</option>
+                  <option value="1.5">150%</option>
+                  <option value="2">200%</option>
+                  <option value="3">300%</option>
+                  <option value="4">400%</option>
+                </select>
+              </label>
+              <div className="visual-style-actions">
+                <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 1 })}>100%</button>
+                <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 0.85 })}>Fit width</button>
+                <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 0.75 })}>Fit screen</button>
+                <button
+                  type="button"
+                  className={visualTemplateMeasureMode ? "active" : ""}
+                  onClick={() => {
+                    setVisualTemplateMeasureMode((current) => !current);
+                    setVisualTemplateMeasurement(null);
+                  }}
+                >
+                  Measure
+                </button>
+              </div>
+            </section>
+            <section className="visual-style-section">
+              <header>
+                <strong>Structure</strong>
+                <small>Containers and slots</small>
+              </header>
+              <div className="visual-style-actions">
+                <button type="button" onClick={addVisualTemplateContainer}>Add container</button>
+                <button type="button" onClick={addVisualTemplateSlot}>Add slot</button>
+                <button type="button" className="danger" onClick={() => deleteVisualTemplateContainer(selectedRegion.id)}>
+                  Delete selected
+                </button>
+                <button type="button" className="danger" onClick={clearVisualTemplateCanvas}>Clear all</button>
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="visual-template-empty-source">
+            <strong>Select a container or slot</strong>
+            <p>Click an item on the template canvas to rename it, resize it, or add slots.</p>
+            <div className="visual-style-actions">
+              <button type="button" onClick={addVisualTemplateContainer}>Add container</button>
+              <button type="button" disabled={!visualTemplateModel.regions.length} onClick={clearVisualTemplateCanvas}>Clear all</button>
+            </div>
+          </div>
+        )}
+      </aside>
+    );
   }
 
   function renderVisualTemplateStylePanel() {
@@ -12955,16 +14400,18 @@ function App() {
 
     return (
       <aside
-        className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+        className={`inspector side-panel visual-template-side-panel visual-template-style-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
         aria-label="Template style panel"
         aria-hidden={activeSidePanel ? undefined : "true"}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <div className="panel-title">
-          <span>Style</span>
-          <div className="panel-title-actions">
+        <div className="visual-template-panel-header">
+          <div className="visual-template-panel-title">
+            <span>Style</span>
             {selectedRegion ? <strong>{selectedRegion.label}</strong> : <strong>None</strong>}
-            <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Style panel" onClick={() => setActiveSidePanel(null)}>
+          </div>
+          <div className="visual-template-panel-actions">
+            <button type="button" className="visual-template-panel-icon-button" title="Close panel" aria-label="Close Style panel" onClick={() => setActiveSidePanel(null)}>
               <CloseIcon />
             </button>
           </div>
@@ -13344,90 +14791,501 @@ function App() {
     );
   }
 
+  function renderVisualTemplateLayersPanel() {
+    const layerRows = getVisualTemplateLayerTreeRows();
+    return (
+      <aside
+        className={`inspector side-panel visual-template-side-panel visual-layers-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
+        aria-label="Template layers panel"
+        aria-hidden={activeSidePanel ? undefined : "true"}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <div className="visual-template-panel-header">
+          <div className="visual-template-panel-title">
+            <span>Layers</span>
+            <strong className="visual-template-panel-count">{visualTemplateModel.regions.length}</strong>
+          </div>
+          <div className="visual-template-panel-actions">
+            <button type="button" className="visual-template-panel-icon-button" title="Add container" aria-label="Add container" onClick={addVisualTemplateContainer}>
+              <PlusIcon />
+            </button>
+            <button type="button" className="visual-template-panel-icon-button" title="Close panel" aria-label="Close Layers panel" onClick={() => setActiveSidePanel(null)}>
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+        <div className="visual-template-side-content visual-layers-panel">
+          <label className="visual-layer-search">
+            <SearchIcon />
+            <input
+              type="search"
+              value={visualTemplateLayerSearch}
+              onChange={(event) => setVisualTemplateLayerSearch(event.target.value)}
+              placeholder="Search layers..."
+              aria-label="Search layers"
+            />
+          </label>
+          <div className="visual-layer-legend" aria-hidden="true">
+            <span><span className="visual-layer-kind container">C</span> Container</span>
+            <span><span className="visual-layer-kind slot">S</span> Slot</span>
+          </div>
+          {layerRows.length ? (
+            <div className="visual-layer-tree">
+            {layerRows.map(({ region, depth, hasChildren, expanded }) => {
+              const selected = visualTemplateSelectedRegionId === region.id;
+              return (
+                <div
+                  key={region.id}
+                  className={`visual-layer-row depth-${Math.min(depth, 4)}${selected ? " active" : ""}${region.hidden ? " hidden-layer" : ""}${region.locked ? " locked-layer" : ""}`}
+                  draggable
+                  onDragStart={() => setVisualTemplateLayerDragId(region.id)}
+                  onDragEnd={() => {
+                    setVisualTemplateLayerDragId(null);
+                    setVisualTemplateDeleteDropActive(false);
+                  }}
+                  onDragOver={(event) => {
+                    if (visualTemplateLayerDragId && visualTemplateLayerDragId !== region.id) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    reorderVisualTemplateLayer(visualTemplateLayerDragId, region.id);
+                    setVisualTemplateLayerDragId(null);
+                  }}
+                >
+                  {depth > 0 && <span className="visual-layer-branch" aria-hidden="true" />}
+                  <button
+                    type="button"
+                    className="visual-layer-disclosure"
+                    disabled={!hasChildren}
+                    title={hasChildren ? (expanded ? "Collapse layer" : "Expand layer") : ""}
+                    aria-label={hasChildren ? `${expanded ? "Collapse" : "Expand"} ${region.label}` : undefined}
+                    onClick={() => hasChildren && toggleVisualTemplateLayerExpanded(region.id)}
+                  >
+                    {hasChildren ? (expanded ? "⌄" : "›") : ""}
+                  </button>
+                  <span className={`visual-layer-kind ${region.kind}`}>{region.kind === "slot" ? "S" : "C"}</span>
+                  <input
+                    aria-label={`Rename ${region.label}`}
+                    value={String(region.label || "")}
+                    onChange={(event) => updateVisualTemplateRegionMeta(region.id, { label: event.target.value })}
+                    onClick={() => setVisualTemplateSelectedRegionId(region.id)}
+                    onFocus={() => setVisualTemplateSelectedRegionId(region.id)}
+                  />
+                  <button
+                    type="button"
+                    className={region.hidden ? "active" : ""}
+                    title={region.hidden ? "Show layer" : "Hide layer"}
+                    aria-label={region.hidden ? `Show ${region.label}` : `Hide ${region.label}`}
+                    onClick={() => updateVisualTemplateRegionMeta(region.id, { hidden: !region.hidden })}
+                  >
+                    {region.hidden ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                  <button
+                    type="button"
+                    className={region.locked ? "active" : ""}
+                    title={region.locked ? "Unlock layer" : "Lock layer"}
+                    aria-label={region.locked ? `Unlock ${region.label}` : `Lock ${region.label}`}
+                    onClick={() => updateVisualTemplateRegionMeta(region.id, { locked: !region.locked })}
+                  >
+                    {region.locked ? <LockIcon /> : <UnlockIcon />}
+                  </button>
+                </div>
+              );
+            })
+            }
+            </div>
+          ) : (
+            <div className="visual-template-empty-source">
+              <strong>No layers yet</strong>
+              <p>{visualTemplateLayerSearch.trim() ? "No layers match your search." : "Add a container, then add slots inside it."}</p>
+              <div className="visual-style-actions">
+                <button type="button" onClick={addVisualTemplateContainer}>Add container</button>
+              </div>
+            </div>
+          )}
+          <div
+            className={`visual-layers-footer${visualTemplateLayerDragId ? " deleting" : ""}${visualTemplateDeleteDropActive ? " delete-active" : ""}`}
+            onDragEnter={(event) => {
+              if (!visualTemplateLayerDragId) return;
+              event.preventDefault();
+              setVisualTemplateDeleteDropActive(true);
+            }}
+            onDragOver={(event) => {
+              if (!visualTemplateLayerDragId) return;
+              event.preventDefault();
+              setVisualTemplateDeleteDropActive(true);
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setVisualTemplateDeleteDropActive(false);
+              }
+            }}
+            onDrop={(event) => {
+              if (!visualTemplateLayerDragId) return;
+              event.preventDefault();
+              deleteDraggedVisualTemplateLayer();
+            }}
+          >
+            {visualTemplateLayerDragId ? (
+              <div className="visual-layer-delete-zone" aria-live="polite">
+                <TrashIcon />
+                <span>{visualTemplateDeleteDropActive ? "Release to delete" : "Drop here to delete"}</span>
+              </div>
+            ) : (
+              <>
+                <button type="button" onClick={addVisualTemplateContainer}>+ Container</button>
+                <button type="button" onClick={addVisualTemplateSlot}>+ Slot</button>
+              </>
+            )}
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
   function renderVisualTemplateWorkbench() {
     const sources = getVisualTemplateSources();
-    const heroRegion = visualTemplateModel.regions.find((region) => region.id === "hero") || visualTemplateModel.regions[0];
-    const summaryRegion = visualTemplateModel.regions.find((region) => region.id === "summary") || visualTemplateModel.regions[1];
-    const bodyRegion = visualTemplateModel.regions.find((region) => region.id === "body") || visualTemplateModel.regions[2];
-    const sidebarRegion = visualTemplateModel.regions.find((region) => region.id === "sidebar") || visualTemplateModel.regions[3];
+    const gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings);
     const getRegionSource = (region) => getVisualTemplateRegionSource(region, sources);
-    const heroSource = getRegionSource(heroRegion);
-    const summarySource = getRegionSource(summaryRegion);
-    const bodySource = getRegionSource(bodyRegion);
-    const sidebarSource = getRegionSource(sidebarRegion);
-    const titleValue = String(getVisualTemplateBindingValue(heroSource, heroRegion?.binding || "title") || "Topic title");
-    const summaryValue = String(getVisualTemplateBindingValue(summarySource, summaryRegion?.binding || "shortdesc") || "Short description slot");
-    const bodyValue = getVisualTemplateBindingValue(bodySource, bodyRegion?.binding || "bodyParagraphs");
-    const sidebarValue = getVisualTemplateBindingValue(sidebarSource, sidebarRegion?.binding || "topicrefs");
-    const bodyParagraphs = Array.isArray(bodyValue) && bodyValue.length ? bodyValue : [String(bodyValue || "Paragraph and section content will flow here.")];
-    const sidebarItems = Array.isArray(sidebarValue) ? sidebarValue : [];
+    const childRegionsByParent = new Map<string, any[]>();
+    visualTemplateModel.regions.forEach((region) => {
+      if (!region.parentId) return;
+      const children = childRegionsByParent.get(region.parentId) || [];
+      children.push(region);
+      childRegionsByParent.set(region.parentId, children);
+    });
+    const topLevelRegions = visualTemplateModel.regions.filter((region) => !region.parentId);
+    const getPlaceholderForBinding = (binding: string) => {
+      if (binding === "title") return "Article title goes here";
+      if (binding === "shortdesc") return "Short description";
+      if (binding === "topicrefs") return "Topic reference slot";
+      return "DITA content slot";
+    };
+    const renderRegionContent = (region) => {
+      const source = getRegionSource(region);
+      const binding = region.binding || (region.role === "headline" ? "title" : "bodyParagraphs");
+      const value = getVisualTemplateBindingValue(source, binding);
+      const childRegions = childRegionsByParent.get(region.id) || [];
+      if (Array.isArray(value) && value.length) {
+        return value.slice(0, 4).map((item, index) => (
+          <span key={`${region.id}-${item}-${index}`} style={getVisualTemplateTextCssStyle(region)}>{item}</span>
+        ));
+      }
+      if (value) {
+        return <p style={getVisualTemplateTextCssStyle(region)}>{String(value)}</p>;
+      }
+      if (visualTemplateModel.artifactType !== "binding" && region.kind !== "slot" && childRegions.length) {
+        return null;
+      }
+      if (visualTemplateModel.artifactType !== "binding" && region.kind === "slot") {
+        return (
+          <p
+            className="visual-template-slot-placeholder"
+            style={{
+              ...getVisualTemplateTextCssStyle(region),
+              color: "#98a2b3",
+              fontStyle: "italic",
+              fontWeight: 500,
+            }}
+          >
+            {getPlaceholderForBinding(binding)}
+          </p>
+        );
+      }
+      return (
+        <>
+          <strong style={getVisualTemplateTextCssStyle(region)}>{region.label || (region.kind === "slot" ? "Slot" : "Container")}</strong>
+          <p style={getVisualTemplateTextCssStyle(region)}>
+            {visualTemplateModel.artifactType === "binding"
+              ? getPlaceholderForBinding(binding)
+              : region.kind === "slot"
+                ? getPlaceholderForBinding(binding)
+                : "Container"}
+          </p>
+        </>
+      );
+    };
+    const renderRegionChrome = (region, className: string, children: React.ReactNode) => {
+      const selected = visualTemplateSelectedRegionId === region.id;
+      const childRegions = childRegionsByParent.get(region.id) || [];
+      const hasSelectedChild = childRegions.some((childRegion) => childRegion.id === visualTemplateSelectedRegionId);
+      if (region.hidden) return null;
+      return (
+        <section
+          key={region.id}
+          className={`${className} visual-drop-region visual-layout-container${visualTemplateDropRegionId === region.id ? " drop-active" : ""}${selected ? " selected" : ""}${hasSelectedChild ? " has-selected-child" : ""}${region.locked ? " locked" : ""}${visualTemplateLayoutDrag?.id === region.id ? " dragging" : ""}${visualTemplateMoveModifierActive ? " move-modifier" : ""}`}
+          style={{ ...getVisualTemplateLayoutStyle(region), ...getVisualTemplateCssStyle(region) }}
+          onClick={(event) => selectVisualTemplateRegion(event, region.id)}
+          onDragOver={(event) => handleVisualTemplateDragOver(event, region.id)}
+          onDragLeave={(event) => handleVisualTemplateDragLeave(event, region.id)}
+          onDrop={(event) => { void bindDroppedFileToVisualRegion(event, region.id); }}
+          title={visualTemplateModel.artifactType === "binding"
+            ? "Drag an edge to resize. Hold Ctrl while dragging an edge to move. Drop a DITA file from Explorer to bind this container."
+            : "Drag an edge to resize. Hold Ctrl while dragging an edge to move. Save this reusable template before creating bindings."}
+        >
+          <span
+            className={`visual-layout-name ${region.kind === "slot" ? "slot" : "container"}${visualTemplateEditingRegionId === region.id ? " editing" : ""}`}
+            title="Double-click to rename"
+            onPointerDown={(event) => {
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              setVisualTemplateSelectedRegionId(region.id);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              startEditingVisualTemplateRegionLabel(region);
+            }}
+          >
+            <i aria-hidden="true" />
+            {region.kind === "slot" ? "S" : "C"}
+            <b aria-hidden="true">·</b>
+            {visualTemplateEditingRegionId === region.id ? (
+              <input
+                autoFocus
+                className="visual-layout-name-input"
+                value={visualTemplateEditingLabel}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setVisualTemplateEditingLabel(event.target.value)}
+                onBlur={commitVisualTemplateRegionLabel}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitVisualTemplateRegionLabel();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelVisualTemplateRegionLabelEdit();
+                  }
+                }}
+              />
+            ) : (
+              region.label
+            )}
+          </span>
+          {children}
+          {childRegions.map((childRegion) => renderRegionChrome(
+            childRegion,
+            "visual-template-slot-region",
+            renderRegionContent(childRegion),
+          ))}
+          {!region.locked && (
+            <>
+              {(["nw", "n", "ne", "e", "se", "s", "sw", "w"] as VisualTemplateResizeHandle[]).map((handle) => (
+                <span
+                  key={handle}
+                  className={`visual-layout-resize-handle ${handle}`}
+                  onPointerDown={(event) => startVisualTemplateLayoutDrag(
+                    event,
+                    region,
+                    event.ctrlKey || visualTemplateMoveModifierActive ? "move" : "resize",
+                    handle,
+                  )}
+                  aria-hidden="true"
+                />
+              ))}
+            </>
+          )}
+        </section>
+      );
+    };
+    const columnGuides = gridSettings.columnGuideCount > 0
+      ? Array.from({ length: gridSettings.columnGuideCount - 1 }, (_, index) => (
+        <span
+          key={`column-guide-${index}`}
+          className="visual-column-guide"
+          style={{ left: `${((index + 1) / gridSettings.columnGuideCount) * 100}%` }}
+        />
+      ))
+      : [];
+    const measurement = visualTemplateMeasurement;
+    const measurementDistance = measurement
+      ? Math.round(Math.hypot(measurement.endX - measurement.startX, measurement.endY - measurement.startY))
+      : 0;
+    const containerCount = visualTemplateModel.regions.filter((region) => region.kind !== "slot").length;
+    const slotCount = visualTemplateModel.regions.filter((region) => region.kind === "slot").length;
+    const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
+    const canUndoVisualTemplate = visualTemplateHistoryVersion >= 0 && visualTemplateUndoStackRef.current.length > 0;
+    const canRedoVisualTemplate = visualTemplateHistoryVersion >= 0 && visualTemplateRedoStackRef.current.length > 0;
 
     return (
       <div className="visual-template-tab">
-        <header className="visual-template-header">
-          <div>
-            <span>Template Binding Document</span>
-            <small>Template: {visualTemplateModel.template?.name || "No template selected"}</small>
-            <input
-              aria-label="Binding document name"
-              value={visualTemplateModel.name}
-              onChange={(event) => setVisualTemplateModel((current) => ({ ...current, name: event.target.value }))}
-            />
-          </div>
-          <button type="button" onClick={saveVisualTemplateDraft}>
-            Save binding document
+        <div className="visual-template-editor-toolbar" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            className="icon-only"
+            disabled={!canUndoVisualTemplate}
+            title="Undo"
+            aria-label="Undo"
+            onClick={undoVisualTemplateChange}
+          >
+            <UndoArrowIcon />
           </button>
-        </header>
+          <button
+            type="button"
+            className="icon-only"
+            disabled={!canRedoVisualTemplate}
+            title="Redo"
+            aria-label="Redo"
+            onClick={redoVisualTemplateChange}
+          >
+            <RedoArrowIcon />
+          </button>
+          <span className="toolbar-divider" aria-hidden="true" />
+          <button type="button" onClick={addVisualTemplateContainer}>
+            <span className="toolbar-icon box" aria-hidden="true" />
+            Add container
+          </button>
+          <button type="button" onClick={addVisualTemplateSlot}>
+            <span className="toolbar-icon plus-circle" aria-hidden="true" />
+            Add slot
+          </button>
+          <span className="toolbar-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className={gridSettings.showGrid ? "active" : ""}
+            onClick={() => updateVisualTemplateGridSettings({ showGrid: !gridSettings.showGrid })}
+          >
+            <span className="toolbar-icon grid" aria-hidden="true" />
+            Grid
+          </button>
+          <button
+            type="button"
+            className={gridSettings.snapToGrid || gridSettings.snapToObjects ? "active" : ""}
+            onClick={() => updateVisualTemplateGridSettings({
+              snapToGrid: !(gridSettings.snapToGrid || gridSettings.snapToObjects),
+              snapToObjects: !(gridSettings.snapToGrid || gridSettings.snapToObjects),
+            })}
+          >
+            <span className="toolbar-icon snap" aria-hidden="true" />
+            Snap
+          </button>
+          <span className="toolbar-divider" aria-hidden="true" />
+          <button type="button" disabled>
+            <EyeIcon />
+            Preview
+          </button>
+          <button
+            type="button"
+            className="icon-only"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={() => updateVisualTemplateGridSettings({ zoom: Math.max(0.25, Number((gridSettings.zoom - 0.25).toFixed(2))) })}
+          >
+            −
+          </button>
+          <span className="visual-template-zoom-label">{Math.round(gridSettings.zoom * 100)}%</span>
+          <button
+            type="button"
+            className="icon-only"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={() => updateVisualTemplateGridSettings({ zoom: Math.min(4, Number((gridSettings.zoom + 0.25).toFixed(2))) })}
+          >
+            +
+          </button>
+          <span className="toolbar-divider" aria-hidden="true" />
+          <button
+            type="button"
+            disabled={!visualTemplateSelectedRegionId}
+            onClick={() => deleteVisualTemplateContainer()}
+          >
+            <TrashIcon />
+            Delete
+          </button>
+          <button
+            type="button"
+            disabled={!visualTemplateModel.regions.length}
+            onClick={clearVisualTemplateCanvas}
+          >
+            <TrashIcon />
+            Clear all
+          </button>
+          <button type="button" className="save-template" onClick={() => { void saveVisualTemplateDraft(); }}>
+            <SaveIcon />
+            Save
+          </button>
+        </div>
 
         <div className="visual-template-grid canvas-only">
           <section className="visual-template-canvas" aria-label="Visual template canvas">
-            <div className="visual-page-preview" onClick={() => setVisualTemplateSelectedRegionId(null)}>
-              <section
-                className={`visual-hero-region visual-drop-region${visualTemplateDropRegionId === "hero" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "hero" ? " selected" : ""}`}
-                style={getVisualTemplateCssStyle(heroRegion)}
-                onClick={(event) => selectVisualTemplateRegion(event, "hero")}
-                onDragOver={(event) => handleVisualTemplateDragOver(event, "hero")}
-                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "hero")}
-                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "hero"); }}
-                title="Drop a DITA file from Explorer to bind this container."
+            <div className="visual-template-stage">
+              <div
+                ref={visualTemplatePreviewRef}
+                className={`visual-page-preview${gridSettings.showGrid ? " grid-visible" : ""}${visualTemplateMeasureMode ? " measuring" : ""}`}
+                style={{
+                  "--visual-grid-size": `${gridSettings.gridSize}px`,
+                  "--visual-template-zoom": gridSettings.zoom,
+                } as React.CSSProperties}
+                onClick={() => setVisualTemplateSelectedRegionId(null)}
+                onPointerDown={handleVisualTemplateMeasurePointerDown}
+                onPointerMove={handleVisualTemplateMeasurePointerMove}
+                onPointerUp={handleVisualTemplateMeasurePointerUp}
               >
-                <h2 style={getVisualTemplateTextCssStyle(heroRegion)}>{titleValue}</h2>
-                <p
-                  className={`visual-template-slot${visualTemplateSelectedRegionId === "summary" ? " selected" : ""}`}
-                  style={getVisualTemplateTextCssStyle(summaryRegion)}
-                  onClick={(event) => selectVisualTemplateRegion(event, "summary")}
-                >
-                  {summaryValue}
-                </p>
-              </section>
-              <section
-                className={`visual-content-region visual-drop-region${visualTemplateDropRegionId === "body" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "body" ? " selected" : ""}`}
-                style={getVisualTemplateCssStyle(bodyRegion)}
-                onClick={(event) => selectVisualTemplateRegion(event, "body")}
-                onDragOver={(event) => handleVisualTemplateDragOver(event, "body")}
-                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "body")}
-                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "body"); }}
-                title="Drop a DITA file from Explorer to bind this container."
-              >
-                {bodyParagraphs.map((paragraph, index) => (
-                  <p key={`${paragraph}-${index}`} style={getVisualTemplateTextCssStyle(bodyRegion)}>{paragraph}</p>
+                {topLevelRegions.map((region) => renderRegionChrome(
+                  region,
+                  region.kind === "slot" ? "visual-template-slot-region" : "visual-custom-region",
+                  renderRegionContent(region),
                 ))}
-              </section>
-              <aside
-                className={`visual-template-callout visual-drop-region${visualTemplateDropRegionId === "sidebar" ? " drop-active" : ""}${visualTemplateSelectedRegionId === "sidebar" ? " selected" : ""}`}
-                style={getVisualTemplateCssStyle(sidebarRegion)}
-                onClick={(event) => selectVisualTemplateRegion(event, "sidebar")}
-                onDragOver={(event) => handleVisualTemplateDragOver(event, "sidebar")}
-                onDragLeave={(event) => handleVisualTemplateDragLeave(event, "sidebar")}
-                onDrop={(event) => { void bindDroppedFileToVisualRegion(event, "sidebar"); }}
-                title="Drop a DITA file from Explorer to bind this container."
-              >
-                <strong style={getVisualTemplateTextCssStyle(sidebarRegion)}>{sidebarItems.length ? `${sidebarItems.length} items` : "Reusable component"}</strong>
-                {sidebarItems.slice(0, 4).map((item, index) => (
-                  <span key={`${item}-${index}`} style={getVisualTemplateTextCssStyle(sidebarRegion)}>{item}</span>
+                {!topLevelRegions.length && (
+                  <div className="visual-template-empty-canvas">
+                    <strong>Blank template</strong>
+                    <p>Add a container to start designing.</p>
+                  </div>
+                )}
+                {columnGuides}
+                {visualTemplateSmartGuides.map((guide, index) => (
+                  <span
+                    key={`${guide.axis}-${guide.value}-${index}`}
+                    className={`visual-smart-guide ${guide.axis}`}
+                    style={guide.axis === "x"
+                      ? { left: guide.value, top: guide.from, height: guide.to - guide.from }
+                      : { top: guide.value, left: guide.from, width: guide.to - guide.from }}
+                  />
                 ))}
-              </aside>
+                {measurement && (
+                  <div className="visual-measurement-layer" aria-hidden="true">
+                    <span
+                      className="visual-measurement-line"
+                      style={{
+                        left: measurement.startX,
+                        top: measurement.startY,
+                        width: Math.max(1, measurementDistance),
+                        transform: `rotate(${Math.atan2(measurement.endY - measurement.startY, measurement.endX - measurement.startX)}rad)`,
+                      }}
+                    />
+                    <span
+                      className="visual-measurement-label"
+                      style={{
+                        left: (measurement.startX + measurement.endX) / 2,
+                        top: (measurement.startY + measurement.endY) / 2,
+                      }}
+                    >
+                      {measurementDistance}px
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
+            <footer className="visual-template-statusbar">
+              <span><i className="dot container" />{containerCount} containers</span>
+              <span><i className="dot slot" />{slotCount} slots</span>
+              <span><i className="dot selected" />Selected: {selectedRegion?.label || "none"}</span>
+              <span><i className="dot muted" />Grid {gridSettings.gridSize}px</span>
+              <span><i className="dot muted" />Snap {gridSettings.snapToGrid || gridSettings.snapToObjects ? "on" : "off"}</span>
+              <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}>
+                <TemplateLayersIcon />
+                Layers
+              </button>
+              <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}>
+                <span className="toolbar-icon box" aria-hidden="true" />
+                Layout
+              </button>
+            </footer>
           </section>
         </div>
       </div>
@@ -15617,7 +17475,7 @@ function App() {
           </aside>
         )}
 
-        {renderedSidePanel === "templateSources" && (
+        {activeIsVisualTemplateBinding && renderedSidePanel === "templateSources" && (
           <aside
             className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
             aria-label="Dropped files panel"
@@ -15671,7 +17529,7 @@ function App() {
           </aside>
         )}
 
-        {renderedSidePanel === "templateBindings" && (
+        {activeIsVisualTemplateBinding && renderedSidePanel === "templateBindings" && (
           <aside
             className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
             aria-label="Template bindings panel"
@@ -15752,32 +17610,62 @@ function App() {
           </aside>
         )}
 
+        {renderedSidePanel === "templateLayers" && renderVisualTemplateLayersPanel()}
+
+        {renderedSidePanel === "templateLayout" && renderVisualTemplateLayoutPanel()}
+
         {renderedSidePanel === "templateStyle" && renderVisualTemplateStylePanel()}
 
         <nav className="side-dock" aria-label="Right side panels" onContextMenu={(event) => event.preventDefault()}>
           {activeIsVisualTemplate ? (
             <>
+              {activeIsVisualTemplateBinding && (
+                <>
+                  <button
+                    className={activeSidePanel === "templateSources" ? "active" : ""}
+                    type="button"
+                    title="Dropped Files"
+                    data-tooltip="Dropped Files"
+                    aria-label="Toggle Dropped Files panel"
+                    aria-pressed={activeSidePanel === "templateSources"}
+                    onClick={() => setActiveSidePanel((current) => current === "templateSources" ? null : "templateSources")}
+                  >
+                    <TemplateSourcesIcon />
+                  </button>
+                  <button
+                    className={activeSidePanel === "templateBindings" ? "active" : ""}
+                    type="button"
+                    title="Bindings"
+                    data-tooltip="Bindings"
+                    aria-label="Toggle Bindings panel"
+                    aria-pressed={activeSidePanel === "templateBindings"}
+                    onClick={() => setActiveSidePanel((current) => current === "templateBindings" ? null : "templateBindings")}
+                  >
+                    <TemplateBindingsIcon />
+                  </button>
+                </>
+              )}
               <button
-                className={activeSidePanel === "templateSources" ? "active" : ""}
+                className={activeSidePanel === "templateLayers" ? "active" : ""}
                 type="button"
-                title="Dropped Files"
-                data-tooltip="Dropped Files"
-                aria-label="Toggle Dropped Files panel"
-                aria-pressed={activeSidePanel === "templateSources"}
-                onClick={() => setActiveSidePanel((current) => current === "templateSources" ? null : "templateSources")}
+                title="Layers"
+                data-tooltip="Layers"
+                aria-label="Toggle Layers panel"
+                aria-pressed={activeSidePanel === "templateLayers"}
+                onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}
               >
-                <TemplateSourcesIcon />
+                <TemplateLayersIcon />
               </button>
               <button
-                className={activeSidePanel === "templateBindings" ? "active" : ""}
+                className={activeSidePanel === "templateLayout" ? "active" : ""}
                 type="button"
-                title="Bindings"
-                data-tooltip="Bindings"
-                aria-label="Toggle Bindings panel"
-                aria-pressed={activeSidePanel === "templateBindings"}
-                onClick={() => setActiveSidePanel((current) => current === "templateBindings" ? null : "templateBindings")}
+                title="Layout"
+                data-tooltip="Layout"
+                aria-label="Toggle Layout panel"
+                aria-pressed={activeSidePanel === "templateLayout"}
+                onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}
               >
-                <TemplateBindingsIcon />
+                <TemplateLayoutIcon />
               </button>
               <button
                 className={activeSidePanel === "templateStyle" ? "active" : ""}
@@ -16044,7 +17932,10 @@ function App() {
       {fileTypePicker && (
         <FileTypePicker
           picker={fileTypePicker}
-          fileTypes={getActiveDitaSchemaProfile().fileTypes}
+          fileTypes={[
+            ...getActiveDitaSchemaProfile().fileTypes,
+            visualTemplateFileType,
+          ]}
           onSelect={(typeKey) => createExplorerFile(typeKey, fileTypePicker.folderId)}
         />
       )}
@@ -16061,10 +17952,29 @@ function App() {
           mode={visualTemplatePickerMode}
           templates={getVisualTemplateCatalog()}
           onSelect={(template) => {
-            startTemplateBindingFromTemplate(template);
+            if (visualTemplatePickerMode === "create" && visualTemplateCreationTarget) {
+              createExplorerVisualTemplateFile(template, visualTemplateCreationTarget);
+            } else {
+              startVisualTemplateDesigner(template);
+            }
             setVisualTemplatePickerMode(null);
           }}
-          onClose={() => setVisualTemplatePickerMode(null)}
+          onClose={() => {
+            setVisualTemplatePickerMode(null);
+            setVisualTemplateCreationTarget(null);
+          }}
+        />
+      )}
+      {visualTemplateSaveAsOpen && (
+        <VisualTemplateSaveAsDialog
+          projectTree={projectTree}
+          initialFolderId={getExplorerTargetFolderId()}
+          suggestedFileName={getSuggestedVisualTemplateFileName()}
+          onSave={(filePath) => {
+            setVisualTemplateSaveAsOpen(false);
+            void saveVisualTemplateDraft(filePath);
+          }}
+          onClose={() => setVisualTemplateSaveAsOpen(false)}
         />
       )}
       {visualTemplateUploadOpen && (
@@ -16325,7 +18235,168 @@ function FileTypePicker({ picker, fileTypes, onSelect }) {
 }
 
 function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
-  const title = mode === "create" ? "Create New Template" : "Open Existing Template";
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [selectedId, setSelectedId] = useState(mode === "create" ? "blank" : templates[0]?.id || "");
+  const title = mode === "create" ? "New template" : "Open template";
+  const createTemplates = [
+    {
+      id: "blank",
+      name: "Blank",
+      description: "Start from scratch with an empty canvas.",
+      category: "Basic",
+      source: "blank",
+      available: true,
+      regions: [],
+      preview: "blank",
+    },
+    {
+      id: "basic",
+      name: "Basic",
+      description: "Hero, Body, Sidebar and Footer containers.",
+      category: "Basic",
+      source: "starter",
+      available: true,
+      regions: defaultVisualTemplateModel.regions,
+      preview: "basic",
+      badge: "Starter",
+    },
+    {
+      id: "article",
+      name: "Article",
+      description: "Single-column article with title and body.",
+      category: "Document",
+      source: "planned",
+      available: false,
+      preview: "article",
+    },
+    {
+      id: "two-column",
+      name: "Two Column",
+      description: "Split layout for side-by-side content.",
+      category: "Document",
+      source: "planned",
+      available: false,
+      preview: "two-column",
+    },
+    {
+      id: "cover-page",
+      name: "Cover Page",
+      description: "Title page with centered content and footer.",
+      category: "Document",
+      source: "planned",
+      available: false,
+      preview: "cover",
+    },
+    {
+      id: "reference",
+      name: "Reference",
+      description: "Structured reference topic with table rows.",
+      category: "DITA",
+      source: "planned",
+      available: false,
+      preview: "reference",
+      badge: "DITA",
+    },
+    {
+      id: "task",
+      name: "Task",
+      description: "Step-by-step task topic layout.",
+      category: "DITA",
+      source: "planned",
+      available: false,
+      preview: "task",
+      badge: "DITA",
+    },
+    {
+      id: "concept",
+      name: "Concept",
+      description: "Concept topic with icon and description.",
+      category: "DITA",
+      source: "planned",
+      available: false,
+      preview: "concept",
+      badge: "DITA",
+    },
+    {
+      id: "newsletter",
+      name: "Newsletter",
+      description: "Multi-column newsletter with hero and article blocks.",
+      category: "Newsletter",
+      source: "planned",
+      available: false,
+      preview: "newsletter",
+      badge: "New",
+    },
+    {
+      id: "email-newsletter",
+      name: "Email Newsletter",
+      description: "Single-column email layout with header and sections.",
+      category: "Newsletter",
+      source: "planned",
+      available: false,
+      preview: "email",
+      badge: "New",
+    },
+    {
+      id: "linkedin",
+      name: "LinkedIn Post",
+      description: "Professional post with image and caption.",
+      category: "Social Media",
+      source: "planned",
+      available: false,
+      preview: "linkedin",
+      badge: "Social",
+    },
+    {
+      id: "instagram",
+      name: "Instagram Post",
+      description: "Square 1:1 visual-first post layout.",
+      category: "Social Media",
+      source: "planned",
+      available: false,
+      preview: "instagram",
+      badge: "Social",
+    },
+  ];
+  const pickerTemplates = mode === "create"
+    ? createTemplates
+    : templates.map((template) => ({
+        ...template,
+        category: "Basic",
+        available: true,
+        preview: "basic",
+      }));
+  const categories = ["All", "Basic", "Document", "DITA", "Newsletter", "Social Media"];
+  const filteredTemplates = pickerTemplates.filter((template) => {
+    const matchesCategory = category === "All" || template.category === category;
+    const haystack = `${template.name} ${template.description} ${template.category}`.toLowerCase();
+    return matchesCategory && haystack.includes(query.trim().toLowerCase());
+  });
+  const selectedTemplate = pickerTemplates.find((template) => template.id === selectedId) || filteredTemplates[0] || pickerTemplates[0];
+  const canCreate = mode !== "create" || selectedTemplate?.available;
+  const actionLabel = mode === "create" ? "Create template" : "Open template";
+
+  function createTemplateFromSelection(template) {
+    if (!template?.available) return;
+    const templateName = template.id === "blank"
+      ? `Blank template ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : `Basic template ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    onSelect({
+      id: `template-${template.id}-${Date.now().toString(36)}`,
+      name: templateName,
+      description: template.description,
+      source: template.source,
+      regions: template.id === "blank" ? [] : defaultVisualTemplateModel.regions,
+    });
+  }
+
+  function chooseTemplate(template) {
+    setSelectedId(template.id);
+    if (mode === "open") {
+      onSelect(template);
+    }
+  }
 
   return (
     <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
@@ -16337,29 +18408,208 @@ function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
         onMouseDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <header>
+        <header className="template-picker-header">
           <div>
-            <span>Template Library</span>
             <strong>{title}</strong>
+            <p>Choose a starting layout for your visual template.</p>
           </div>
           <button type="button" aria-label="Close template picker" onClick={onClose}>
             <CloseIcon />
           </button>
         </header>
-        <p>
-          Choose a visual template first. The editor will then create a template-binding document where you bind DITA files to its containers and slots.
-        </p>
-        <div className="template-picker-list">
-          {templates.map((template) => (
-            <button type="button" key={template.id} onClick={() => onSelect(template)}>
-              <span>{template.source}</span>
-              <strong>{template.name}</strong>
-              <small>{template.description}</small>
-              <em>{template.regions?.length || 0} containers</em>
-            </button>
-          ))}
+        <div className="template-picker-filters">
+          <label className="template-picker-search">
+            <SearchIcon />
+            <input
+              type="search"
+              value={query}
+              placeholder="Search templates..."
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="template-picker-categories" aria-label="Template categories">
+            {categories.map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={category === item ? "active" : ""}
+                onClick={() => setCategory(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
+        <div className="template-picker-list" role="listbox" aria-label="Template layouts">
+          {filteredTemplates.map((template) => {
+            const selected = selectedTemplate?.id === template.id;
+            return (
+              <button
+                type="button"
+                key={template.id}
+                className={`template-layout-card${selected ? " selected" : ""}${template.available ? "" : " disabled"}`}
+                onClick={() => chooseTemplate(template)}
+                onDoubleClick={() => template.available && createTemplateFromSelection(template)}
+                aria-selected={selected}
+              >
+                <TemplatePreview variant={template.preview} badge={template.badge} />
+                <span className="template-selected-check" aria-hidden="true">
+                  <CheckIcon />
+                </span>
+                <strong>{template.name}</strong>
+                <small>{template.description}</small>
+              </button>
+            );
+          })}
+          {filteredTemplates.length === 0 && (
+            <div className="template-picker-empty">No templates match your search.</div>
+          )}
+        </div>
+        <footer className="template-picker-footer">
+          <div>
+            <span className="template-picker-dot" aria-hidden="true" />
+            <strong>{selectedTemplate?.name || "Blank"}</strong>
+            <span>{selectedTemplate?.available ? "selected · double-click to create" : "preview only · coming later"}</span>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!canCreate}
+            onClick={() => (mode === "create" ? createTemplateFromSelection(selectedTemplate) : selectedTemplate && onSelect(selectedTemplate))}
+          >
+            {actionLabel}
+          </button>
+        </footer>
       </section>
+    </div>
+  );
+}
+
+function VisualTemplateSaveAsDialog({ projectTree, initialFolderId, suggestedFileName, onSave, onClose }) {
+  const folders = collectVisualTemplateFolders(projectTree);
+  const fallbackFolderId = folders.find((folder) => folder.path === "content")?.id || folders[0]?.id || projectTree.id;
+  const initialFolderExists = folders.some((folder) => folder.id === initialFolderId);
+  const [selectedFolderId, setSelectedFolderId] = useState(initialFolderExists ? initialFolderId : fallbackFolderId);
+  const [fileName, setFileName] = useState(suggestedFileName || "visual-template.af-template.json");
+  const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) || folders[0];
+  const normalizedFileName = normalizeFileName(fileName || "visual-template", "visual-template");
+  const selectedFolderNode = selectedFolder ? findProjectNode(projectTree, selectedFolder.id)?.node : null;
+  const duplicateName = Boolean(selectedFolderNode?.children?.some((child) => (
+    child.type === "file"
+    && !child.deletedAt
+    && String(child.name || "").toLowerCase() === normalizedFileName.toLowerCase()
+  )));
+  const canSave = Boolean(selectedFolder && normalizedFileName.trim() && !duplicateName);
+  const targetPath = selectedFolder ? getGitHubChildPath(selectedFolder.node, normalizedFileName) || normalizedFileName : normalizedFileName;
+
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-save-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Save visual template"
+        onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header className="template-picker-header">
+          <div>
+            <strong>Save template as</strong>
+            <p>Choose where this visual template should live in the workspace.</p>
+          </div>
+          <button type="button" aria-label="Close save template dialog" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <div className="template-save-body">
+          <label className="template-save-field">
+            <span>File name</span>
+            <input
+              type="text"
+              value={fileName}
+              onChange={(event) => setFileName(event.target.value)}
+              onBlur={() => setFileName(normalizedFileName)}
+              autoFocus
+            />
+          </label>
+          <section className="template-save-location" aria-label="Template location">
+            <div className="template-save-section-title">Location</div>
+            <div className="template-save-folder-list">
+              {folders.map((folder) => (
+                <button
+                  type="button"
+                  key={folder.id}
+                  className={folder.id === selectedFolderId ? "active" : ""}
+                  style={{ "--folder-depth": folder.depth } as React.CSSProperties}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                >
+                  <FolderFileIcon />
+                  <span>{folder.path || "Workspace root"}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <div className={`template-save-preview${duplicateName ? " error" : ""}`}>
+            <span>{duplicateName ? "A file with this name already exists." : "Will be saved as"}</span>
+            <strong>{duplicateName ? normalizedFileName : targetPath}</strong>
+          </div>
+        </div>
+        <footer className="template-picker-footer">
+          <div>
+            <span className="template-picker-dot" aria-hidden="true" />
+            <strong>{normalizedFileName}</strong>
+            <span>{selectedFolder?.path ? `in ${selectedFolder.path}` : "in workspace root"}</span>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!canSave}
+            onClick={() => onSave(targetPath)}
+          >
+            Save template
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function collectVisualTemplateFolders(node, pathParts: string[] = [], depth = 0) {
+  if (!node || node.deletedAt) return [];
+  if (node.type !== "folder") return [];
+  const folderPath = node.githubPath
+    ? normalizeProjectPath(node.githubPath)
+    : normalizeProjectPath([...pathParts, depth === 0 ? "" : node.name].filter(Boolean).join("/"));
+  const current = [{
+    id: node.id,
+    node,
+    name: node.name,
+    path: folderPath,
+    depth,
+  }];
+  const children = (node.children || [])
+    .filter((child) => child.type === "folder" && !child.deletedAt)
+    .flatMap((child) => collectVisualTemplateFolders(child, folderPath ? folderPath.split("/") : [], depth + 1));
+  return current.concat(children);
+}
+
+function TemplatePreview({ variant, badge }) {
+  return (
+    <div className={`template-preview ${variant || "basic"}`} aria-hidden="true">
+      {badge && <span className={`template-preview-badge ${String(badge).toLowerCase().replace(/\s+/g, "-")}`}>{badge}</span>}
+      {variant === "blank" ? (
+        <span className="template-preview-plus">+</span>
+      ) : (
+        <>
+          <span className="preview-line wide" />
+          <span className="preview-line medium" />
+          <span className="preview-line small" />
+          <span className="preview-line side" />
+          <span className="preview-line footer" />
+        </>
+      )}
     </div>
   );
 }
@@ -16387,7 +18637,7 @@ function VisualTemplateUploadDialog({ onUpload, onClose }) {
           </button>
         </header>
         <p>
-          Upload an existing template JSON file. The editor will create a new template-binding document from that template.
+          Upload an existing template JSON file. It will open as a reusable template definition that can be saved and bound later.
         </p>
         <label className="template-upload-dropzone">
           <input
@@ -16805,6 +19055,18 @@ function FileTypeIcon({ kind }) {
         <path d="M10 7.5h4" />
         <path d="M16.5 10v2.5a2.5 2.5 0 0 1-2.5 2.5" />
         <path d="M7.5 10v2.5A2.5 2.5 0 0 0 10 15" />
+      </svg>
+    );
+  }
+
+  if (kind === "visual-template") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M7 8h10" />
+        <path d="M7 11h4" />
+        <rect x="7" y="13" width="4" height="3" rx=".6" />
+        <rect x="13" y="13" width="4" height="3" rx=".6" />
       </svg>
     );
   }
@@ -17251,6 +19513,14 @@ function SearchIcon() {
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M5 12.5 9.2 16.7 19 7" />
+    </svg>
+  );
+}
+
 function ChatIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -17313,6 +19583,28 @@ function TemplateBindingsIcon() {
   );
 }
 
+function TemplateLayersIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M12 4 4.5 8 12 12l7.5-4z" />
+      <path d="M6.5 11.5 12 14.5l5.5-3" />
+      <path d="M6.5 15 12 18l5.5-3" />
+    </svg>
+  );
+}
+
+function TemplateLayoutIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M8 9h8" />
+      <path d="M8 12h4" />
+      <path d="M13 12h3" />
+      <path d="M8 15h8" />
+    </svg>
+  );
+}
+
 function TemplateStyleIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -17321,6 +19613,85 @@ function TemplateStyleIcon() {
       <path d="M13.5 6.5 15 5l4 4-1.5 1.5" />
       <path d="M5.5 5.5h5" />
       <path d="M5.5 8.5h3" />
+    </svg>
+  );
+}
+
+function UndoArrowIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M9 7 5 11l4 4" />
+      <path d="M5 11h9a5 5 0 0 1 0 10h-2" />
+    </svg>
+  );
+}
+
+function RedoArrowIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="m15 7 4 4-4 4" />
+      <path d="M19 11h-9a5 5 0 0 0 0 10h2" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M3.5 12s3.2-5.5 8.5-5.5 8.5 5.5 8.5 5.5-3.2 5.5-8.5 5.5S3.5 12 3.5 12z" />
+      <circle cx="12" cy="12" r="2.2" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M3.5 12s3.2-5.5 8.5-5.5c1.5 0 2.8.4 3.9 1" />
+      <path d="M20.5 12s-3.2 5.5-8.5 5.5c-1.4 0-2.7-.4-3.8-1" />
+      <path d="M4 4l16 16" />
+      <path d="M10.6 10.6a2.2 2.2 0 0 0 2.8 2.8" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="6.5" y="10" width="11" height="9" rx="2" />
+      <path d="M8.5 10V7.8a3.5 3.5 0 0 1 7 0V10" />
+    </svg>
+  );
+}
+
+function UnlockIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="6.5" y="10" width="11" height="9" rx="2" />
+      <path d="M8.5 10V7.8a3.5 3.5 0 0 1 6.6-1.6" />
+      <path d="M16.2 4.7 18 3" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4 7h16" />
+      <path d="M9 7V5.8A1.8 1.8 0 0 1 10.8 4h2.4A1.8 1.8 0 0 1 15 5.8V7" />
+      <path d="M6.5 7 7.4 19a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8L17.5 7" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M5 4h12l2 2v14H5z" />
+      <path d="M8 4v6h8V4" />
+      <path d="M8 20v-6h8v6" />
     </svg>
   );
 }
@@ -17372,6 +19743,15 @@ function CloseIcon() {
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
       <path d="M6 6l12 12" />
       <path d="M18 6 6 18" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
     </svg>
   );
 }

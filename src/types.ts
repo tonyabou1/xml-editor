@@ -133,7 +133,7 @@ export type AppNotification = {
   toastDismissed?: boolean;
 };
 
-export type SidePanelId = "inspector" | "schema" | "search" | "chat" | "aiReview" | "github" | "notifications" | "help" | "templateSources" | "templateBindings" | "templateStyle";
+export type SidePanelId = "inspector" | "schema" | "search" | "chat" | "aiReview" | "github" | "notifications" | "help" | "templateSources" | "templateBindings" | "templateLayers" | "templateLayout" | "templateStyle";
 export type AppMenuCommand = "createVisualTemplate" | "customizeAuthoring" | "importFile" | "importVisualTemplate" | "openVisualTemplate" | "undo" | "redo" | "preferences" | "specializations" | "uploadVisualTemplate" | "viewTerminal" | "visualTemplates";
 
 export type AppMenuItem = {
