@@ -27,6 +27,13 @@ function getProjectPathCandidates(path = "") {
   return [...candidates].filter(Boolean);
 }
 
+function getStorageProjectPath(path = "") {
+  const normalizedPath = normalizeProjectPath(path);
+  return normalizedPath.startsWith("content/")
+    ? normalizedPath.slice("content/".length)
+    : normalizedPath;
+}
+
 export async function getCurrentProjectTree(userId) {
   const repositoryResult = await query(
     `
@@ -119,6 +126,47 @@ export async function getCurrentProjectTree(userId) {
       sourceContentHash: row.source_content_hash || "",
       draftContentHash: row.draft_content_hash || "",
     })),
+  };
+}
+
+export async function saveCurrentProjectFolder(userId, rawPath) {
+  const normalizedPath = normalizeProjectPath(rawPath);
+  if (!normalizedPath) {
+    throw Object.assign(new Error("A project folder path is required."), { statusCode: 400 });
+  }
+
+  const repositoryResult = await query(
+    `
+      select id, full_name, html_url, default_branch
+      from github_repositories
+      where user_id = $1
+      order by selected_at desc
+      limit 1
+    `,
+    [userId],
+  );
+
+  if (!repositoryResult.rowCount) {
+    throw Object.assign(new Error("Select a GitHub repository before creating folders."), { statusCode: 409 });
+  }
+
+  const membership = await getPrimaryMembership(userId);
+  if (!membership) {
+    throw Object.assign(new Error("Join a team before creating project folders."), { statusCode: 409 });
+  }
+
+  const repository = repositoryResult.rows[0];
+  const project = await upsertCurrentGitHubProject(userId, membership, repository);
+  const folder = await upsertProjectFolderWithParents({
+    projectId: project.id,
+    folderPath: normalizedPath,
+    userId,
+  });
+
+  return {
+    repository,
+    project,
+    folder,
   };
 }
 
@@ -276,4 +324,282 @@ export async function deleteCurrentProjectPath(userId, rawPath) {
     path: normalizedPath,
     repository,
   };
+}
+
+export async function moveCurrentProjectPath(userId, { oldPath: rawOldPath, newPath: rawNewPath } = {}) {
+  const oldPath = getStorageProjectPath(rawOldPath);
+  const newPath = getStorageProjectPath(rawNewPath);
+
+  if (!oldPath || !newPath) {
+    throw Object.assign(new Error("Both source and destination project paths are required."), { statusCode: 400 });
+  }
+
+  if (oldPath === newPath) {
+    return {
+      movedDrafts: 0,
+      movedProjectFiles: 0,
+      oldPath,
+      newPath,
+    };
+  }
+
+  if (newPath.startsWith(`${oldPath}/`)) {
+    throw Object.assign(new Error("A folder cannot be moved into itself."), { statusCode: 400 });
+  }
+
+  const repositoryResult = await query(
+    `
+      select id, full_name
+      from github_repositories
+      where user_id = $1
+      order by selected_at desc
+      limit 1
+    `,
+    [userId],
+  );
+
+  if (!repositoryResult.rowCount) {
+    throw Object.assign(new Error("Select a GitHub repository before moving files."), { statusCode: 409 });
+  }
+
+  const repository = repositoryResult.rows[0];
+  const projectResult = await query(
+    `
+      select id
+      from projects
+      where repository_url is not null
+        and name = $1
+      order by updated_at desc
+      limit 1
+    `,
+    [repository.full_name],
+  );
+
+  if (!projectResult.rowCount) {
+    return {
+      movedDrafts: 0,
+      movedProjectFiles: 0,
+      oldPath,
+      newPath,
+      repository,
+    };
+  }
+
+  const project = projectResult.rows[0];
+  const conflictResult = await query(
+    `
+      select 1
+      from project_files
+      where project_id = $1
+        and path = $2
+      limit 1
+    `,
+    [project.id, newPath],
+  );
+
+  if (conflictResult.rowCount) {
+    throw Object.assign(new Error("A file or folder already exists at the destination."), { statusCode: 409 });
+  }
+
+  const draftConflictResult = await query(
+    `
+      select 1
+      from github_file_drafts
+      where github_repository_id = $1
+        and user_id = $2
+        and file_path = $3
+      limit 1
+    `,
+    [repository.id, userId, newPath],
+  );
+
+  if (draftConflictResult.rowCount) {
+    throw Object.assign(new Error("A saved draft already exists at the destination."), { statusCode: 409 });
+  }
+
+  const filesResult = await query(
+    `
+      with moved as (
+        update project_files
+        set path = $3 || substring(path from length($2) + 1),
+            name = regexp_replace($3 || substring(path from length($2) + 1), '^.*/', ''),
+            updated_at = now()
+        where project_id = $1
+          and deleted_at is null
+          and (
+            path = $2
+            or path like $2 || '/%'
+          )
+        returning id
+      )
+      select count(*)::int as count
+      from moved
+    `,
+    [project.id, oldPath, newPath],
+  );
+
+  const draftsResult = await query(
+    `
+      with moved as (
+        update github_file_drafts
+        set file_path = $4 || substring(file_path from length($3) + 1),
+            updated_at = now(),
+            saved_at = now()
+        where github_repository_id = $1
+          and user_id = $2
+          and (
+            file_path = $3
+            or file_path like $3 || '/%'
+          )
+        returning id
+      )
+      select count(*)::int as count
+      from moved
+    `,
+    [repository.id, userId, oldPath, newPath],
+  );
+
+  return {
+    movedDrafts: Number(draftsResult.rows[0]?.count || 0),
+    movedProjectFiles: Number(filesResult.rows[0]?.count || 0),
+    oldPath,
+    newPath,
+    repository,
+  };
+}
+
+async function getPrimaryMembership(userId) {
+  const result = await query(
+    `
+      select
+        teams.organization_id,
+        team_members.team_id
+      from team_members
+      join teams on teams.id = team_members.team_id
+      where team_members.user_id = $1
+      order by team_members.created_at asc
+      limit 1
+    `,
+    [userId],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function upsertCurrentGitHubProject(userId, membership, repository) {
+  const slug = `github-${slugify(repository.full_name)}`;
+  const result = await query(
+    `
+      insert into projects (
+        organization_id,
+        team_id,
+        name,
+        slug,
+        repository_url,
+        default_branch,
+        created_by
+      )
+      values ($1, $2, $3, $4, $5, $6, $7)
+      on conflict (organization_id, slug)
+      do update set
+        team_id = excluded.team_id,
+        name = excluded.name,
+        repository_url = excluded.repository_url,
+        default_branch = excluded.default_branch,
+        updated_at = now()
+      returning id, name, slug
+    `,
+    [
+      membership.organization_id,
+      membership.team_id,
+      repository.full_name,
+      slug,
+      repository.html_url || repository.full_name,
+      repository.default_branch || "main",
+      userId,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+async function upsertProjectFolderWithParents({ projectId, folderPath, userId }) {
+  const parts = normalizeProjectPath(folderPath).split("/").filter(Boolean);
+  let parentId = null;
+  let folder = null;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const currentPath = parts.slice(0, index + 1).join("/");
+    folder = await upsertProjectFile({
+      projectId,
+      parentId,
+      path: currentPath,
+      name: parts[index],
+      kind: "folder",
+      ditaType: null,
+      mimeType: null,
+      githubSha: null,
+      sizeBytes: null,
+      userId,
+    });
+    parentId = folder.id;
+  }
+
+  return folder;
+}
+
+async function upsertProjectFile(file) {
+  const result = await query(
+    `
+      insert into project_files (
+        project_id,
+        parent_id,
+        path,
+        name,
+        kind,
+        dita_type,
+        mime_type,
+        github_sha,
+        size_bytes,
+        created_by,
+        updated_by
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+      on conflict (project_id, path)
+      do update set
+        parent_id = excluded.parent_id,
+        name = excluded.name,
+        kind = excluded.kind,
+        dita_type = excluded.dita_type,
+        mime_type = excluded.mime_type,
+        github_sha = excluded.github_sha,
+        size_bytes = excluded.size_bytes,
+        deleted_at = null,
+        updated_by = excluded.updated_by,
+        updated_at = now()
+      returning id, path, kind
+    `,
+    [
+      file.projectId,
+      file.parentId,
+      file.path,
+      file.name,
+      file.kind,
+      file.ditaType,
+      file.mimeType,
+      file.githubSha,
+      file.sizeBytes,
+      file.userId,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+function slugify(value) {
+  return String(value || "repository")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "repository";
 }

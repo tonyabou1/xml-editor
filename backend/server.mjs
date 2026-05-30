@@ -12,6 +12,10 @@ import {
 } from "./authoringProfiles.mjs";
 import { requireAuth0User } from "./auth0.mjs";
 import { buildDitaRngSchema } from "./ditaRngSchema.mjs";
+import {
+  listTeamDesignSystem,
+  saveTeamDesignSystem,
+} from "./designSystem.mjs";
 import { getDatabaseStatus } from "./db.mjs";
 import { discardGitHubFileDraft, getGitHubFileDraft, saveGitHubFileDraft } from "./drafts.mjs";
 import {
@@ -39,7 +43,12 @@ import {
   createUserNotification,
   listUserNotifications,
 } from "./notifications.mjs";
-import { deleteCurrentProjectPath, getCurrentProjectTree } from "./projects.mjs";
+import {
+  deleteCurrentProjectPath,
+  getCurrentProjectTree,
+  moveCurrentProjectPath,
+  saveCurrentProjectFolder,
+} from "./projects.mjs";
 import { addUserSpellingDictionaryWord, checkSpellingSegments } from "./spelling.mjs";
 import {
   listSpecializations,
@@ -91,7 +100,7 @@ const maxRequestBytes = 50 * 1024 * 1024;
 function sendJson(res, statusCode, body) {
   res.statusCode = statusCode;
   res.setHeader("Access-Control-Allow-Origin", process.env.BACKEND_CORS_ORIGIN || "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body, null, 2));
@@ -732,6 +741,22 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/projects/folder") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 201, await saveCurrentProjectFolder(account.user.id, body.path));
+    return;
+  }
+
+  if (req.method === "PATCH" && url.pathname === "/api/projects/path") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await moveCurrentProjectPath(account.user.id, body));
+    return;
+  }
+
   if (req.method === "DELETE" && url.pathname === "/api/projects/path") {
     const identity = await requireAuth0User(req);
     const account = await syncAuthenticatedUser(identity);
@@ -774,6 +799,21 @@ async function handleRequest(req, res) {
     const account = await syncAuthenticatedUser(identity);
     const body = await readJsonBody(req);
     sendJson(res, 200, await saveTeamAuthoringProfiles(account, body));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/design-system") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    sendJson(res, 200, await listTeamDesignSystem(account));
+    return;
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/design-system") {
+    const identity = await requireAuth0User(req);
+    const account = await syncAuthenticatedUser(identity);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await saveTeamDesignSystem(account, body));
     return;
   }
 

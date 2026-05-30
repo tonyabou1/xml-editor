@@ -1,10 +1,70 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { DiffEditor } from "@monaco-editor/react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { MiniExplorerTree } from "./components/common/MiniExplorerTree";
+import { VisualNumberStepper } from "./components/common/VisualNumberStepper";
 import { appMenus } from "./config/appMenus";
 import { authoringRibbonGroups } from "./config/authoringRibbon";
+import {
+  aiReviewSampleXml,
+  brokenDitaXml,
+  relatedTopicXml,
+  sampleImagePreviewUrl,
+  starterXml,
+} from "./data/sampleDocuments";
+import {
+  getCreateVisualTemplateOptions,
+  visualTemplateCategories,
+} from "./visual-template/catalog";
+import {
+  fallbackDesignSystem,
+  getStyleClassForRegion,
+  getStyleClassesForRegionKind,
+  getTokenMap,
+  normalizeDesignSystem,
+  resolveStyleTokens,
+  type DesignSystem,
+  type DesignToken,
+  type DesignTokenType,
+  type StyleClass,
+  type StyleClassTarget,
+} from "./design-system/model";
+import {
+  cssUrlValue,
+  defaultVisualTemplateModel,
+  getVisualTemplateFileArtifactType,
+  isVisualTemplateBindingArtifactType,
+  isVisualTemplateFileName,
+  isVisualTemplateStructureLockedArtifactType,
+  normalizeVisualTemplateGridSettings,
+  normalizeVisualTemplateLayout,
+  normalizeVisualTemplateModel,
+  normalizeVisualTemplateStyle,
+  parseVisualTemplateModel,
+  rgbaFromHexColor,
+  visualTemplateGridDefaults,
+  visualTemplatePageSize,
+  visualTemplateStyleDefaults,
+  type VisualTemplateResizeHandle,
+} from "./visual-template/model";
+import {
+  evaluateVisualTemplateBindingRule,
+  getEmptyVisualTemplateBindingRule,
+  getVisualTemplateBindingOptions,
+  getVisualTemplateBindingValue,
+  getVisualTemplateRegionBindingRule,
+} from "./bindings/utils/model";
+import { TemplateBindingsPanel } from "./bindings/components/TemplateBindingsPanel";
+import { TemplateSourcesPanel } from "./bindings/components/TemplateSourcesPanel";
+import {
+  createTemplateBindingSourceFromFile,
+  findTemplateBindingSourceForDrop,
+  getTemplateBindingPathVariants,
+  getTemplateBindingSourceLabel,
+  templateBindingSourceMatchesDrop,
+} from "./bindings/utils/sources";
 import "./styles.css";
 import {
   formatGitCommitDate,
@@ -12,6 +72,11 @@ import {
   formatTerminalTime,
   getGitBranchDisplayName,
 } from "./utils/formatters";
+import {
+  getProjectPathLengthMessage,
+  sanitizeProjectFileNameStem,
+  sanitizeProjectItemName,
+} from "./utils/fileNames";
 import {
   getProjectNodePath,
   getProjectPathParts,
@@ -72,63 +137,6 @@ function stripEditableCaretSeed(value = "") {
   return value.replace(/\u200b/g, "");
 }
 
-const starterXml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
-<topic id="browser-xml-editor">
-  <title>Browser XML Editor</title>
-  <shortdesc>Edit DITA topic content in a structured WYSIWYG surface.</shortdesc>
-  <body>
-    <section id="overview">
-      <title>Overview</title>
-      <p>This editor keeps XML source and the visual document synchronized. See <xref href="related-topic.dita">sample related topic</xref>.</p>
-      <note type="tip">Use the insert bar to add DITA-safe elements.</note>
-      <fig id="sample-figure">
-        <title>Sample figure</title>
-        <image href="../assets/sample-figure.png" alt="Placeholder DITA image"/>
-      </fig>
-    </section>
-    <section id="workflow">
-      <title>Workflow</title>
-      <p>Validate the document, format the XML, and export the topic when ready.</p>
-      <ul>
-        <li>Edit the rendered DITA topic.</li>
-        <li>Inspect the source XML.</li>
-        <li>Fix schema issues before publishing.</li>
-      </ul>
-    </section>
-  </body>
-</topic>`;
-
-const brokenDitaXml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
-<topic id="broken-validation-sample">
-  <body>
-    <p>This body appears before the required title, so DITA-OT should report a schema error.</p>
-  </body>
-  <title>Broken validation sample</title>
-</topic>`;
-
-const relatedTopicXml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA 1.3 Topic//EN" "topic.dtd">
-<topic id="related-topic">
-  <title>Sample related topic</title>
-  <shortdesc>A valid referenced topic used by the starter sample.</shortdesc>
-  <body>
-    <p>This topic exists so xref validation can resolve a real DITA target.</p>
-  </body>
-</topic>`;
-
-const aiReviewSampleXml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE concept PUBLIC "-//OASIS//DTD DITA 1.3 Concept//EN" "concept.dtd">
-<concept id="ai-review-sample">
-  <title>AI review sample</title>
-  <conbody>
-    <p>This paragraph is intentionally long so the ambient AI review can flag it as a candidate for splitting into smaller DITA blocks. It describes a publishing workflow where authors update release notes, validate references, coordinate with reviewers, confirm image links, verify conref targets, prepare branch changes, and publish the final topic after the content passes all required checks. The paragraph keeps going so it crosses the configured threshold and creates a useful test case for the first review foundation.</p>
-    <note>This note intentionally has no type attribute so the AI Review can suggest adding type="note".</note>
-  </conbody>
-</concept>`;
-
-const sampleImagePreviewUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAACWCAYAAABkW7XSAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAANSURBVHhe7cEBAQAAAMKg9U9tDB8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgYwEoAAABP9sEWAAAAABJRU5ErkJggg==";
 const backendBaseUrl = import.meta.env.VITE_XML_EDITOR_BACKEND_URL || "http://127.0.0.1:3174";
 const specializationsTabId = "system-specializations-workbench";
 const specializationsTabFile = {
@@ -146,344 +154,38 @@ const visualTemplatesTabFile = {
   ditaType: "visual-template",
   content: "",
 };
-const visualTemplatePageSize = { width: 760, height: 560 };
-const visualTemplateGridDefaults = {
-  showGrid: true,
-  gridSize: 16,
-  snapToGrid: true,
-  snapToObjects: true,
-  snapThreshold: 4,
-  columnGuideCount: 0,
-  zoom: 1,
+const localAssetImportMaxBytes = 10 * 1024 * 1024;
+const localAssetImportAllowedExtensions = new Set([
+  "avif",
+  "css",
+  "csv",
+  "dita",
+  "ditamap",
+  "gif",
+  "htm",
+  "html",
+  "jpeg",
+  "jpg",
+  "js",
+  "json",
+  "md",
+  "pdf",
+  "png",
+  "svg",
+  "txt",
+  "webp",
+  "xml",
+  "yaml",
+  "yml",
+]);
+const designSystemTabId = "system-design-system-workbench";
+const designSystemTabFile = {
+  id: designSystemTabId,
+  name: "Design System",
+  type: "file",
+  ditaType: "design-system",
+  content: "",
 };
-type VisualTemplateResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
-const defaultVisualTemplateModel = {
-  artifactType: "template",
-  id: "topic-deliverable-template",
-  name: "Topic deliverable template",
-  template: {
-    id: "topic-deliverable-template",
-    name: "Topic deliverable template",
-    source: "built-in",
-  },
-  output: "responsive-html",
-  filePath: "",
-  regions: [
-    {
-      id: "hero",
-      label: "Hero",
-      kind: "container",
-      role: "headline",
-      binding: "title",
-      notes: "Primary title slot for the selected topic or map.",
-      layout: { x: 28, y: 28, width: 704, height: 150, zIndex: 1 },
-      style: {
-        fillMode: "gradient",
-        backgroundColor: "#eef5ff",
-        gradientFrom: "#eef5ff",
-        gradientTo: "#fff7ed",
-        gradientAngle: 135,
-        backgroundImage: "",
-        backgroundImageMode: "none",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-        backgroundOverlayColor: "#000000",
-        backgroundOverlayOpacity: 0,
-        borderColor: "#b9c9df",
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 14,
-        minHeight: 150,
-        shadowPreset: "soft",
-        shadowColor: "#23406f",
-        shadowOpacity: 14,
-        shadowX: 0,
-        shadowY: 18,
-        shadowBlur: 38,
-        animationName: "none",
-        animationDuration: 600,
-        animationDelay: 0,
-      },
-      textStyle: {
-        color: "#172033",
-        fontSize: 13,
-        fontWeight: 650,
-        textAlign: "left",
-      },
-    },
-    {
-      id: "heroTitle",
-      label: "Title",
-      kind: "slot",
-      parentId: "hero",
-      role: "headline",
-      binding: "title",
-      notes: "Primary title slot inside the hero container.",
-      layout: { x: 22, y: 30, width: 470, height: 44, zIndex: 2 },
-      style: {},
-      textStyle: {
-        color: "#172033",
-        fontSize: 22,
-        fontWeight: 800,
-        textAlign: "left",
-      },
-    },
-    {
-      id: "summary",
-      label: "Summary",
-      kind: "slot",
-      parentId: "hero",
-      role: "deck",
-      binding: "shortdesc",
-      notes: "Short description or generated abstract.",
-      layout: { x: 22, y: 88, width: 470, height: 38, zIndex: 2 },
-      style: {},
-      textStyle: {
-        color: "#475467",
-        fontSize: 13,
-        fontWeight: 550,
-        textAlign: "left",
-      },
-    },
-    {
-      id: "body",
-      label: "Body",
-      kind: "container",
-      role: "flow",
-      binding: "bodyParagraphs",
-      notes: "Main authored paragraphs and sections.",
-      layout: { x: 28, y: 196, width: 500, height: 320, zIndex: 1 },
-      style: {
-        fillMode: "solid",
-        backgroundColor: "#ffffff",
-        gradientFrom: "#ffffff",
-        gradientTo: "#eef5ff",
-        gradientAngle: 135,
-        backgroundImage: "",
-        backgroundImageMode: "none",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-        backgroundOverlayColor: "#000000",
-        backgroundOverlayOpacity: 0,
-        borderColor: "#b9c9df",
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 14,
-        minHeight: 260,
-        shadowPreset: "none",
-        shadowColor: "#23406f",
-        shadowOpacity: 12,
-        shadowX: 0,
-        shadowY: 12,
-        shadowBlur: 24,
-        animationName: "none",
-        animationDuration: 600,
-        animationDelay: 0,
-      },
-      textStyle: {
-        color: "#475467",
-        fontSize: 13,
-        fontWeight: 500,
-        textAlign: "left",
-      },
-    },
-    {
-      id: "sidebar",
-      label: "Sidebar",
-      kind: "container",
-      role: "navigation",
-      binding: "topicrefs",
-      notes: "Map topic references or supporting links.",
-      layout: { x: 552, y: 196, width: 180, height: 320, zIndex: 1 },
-      style: {
-        fillMode: "solid",
-        backgroundColor: "#fbfdff",
-        gradientFrom: "#fbfdff",
-        gradientTo: "#eef5ff",
-        gradientAngle: 135,
-        backgroundImage: "",
-        backgroundImageMode: "none",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-        backgroundOverlayColor: "#000000",
-        backgroundOverlayOpacity: 0,
-        borderColor: "#b9c9df",
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 14,
-        minHeight: 260,
-        shadowPreset: "none",
-        shadowColor: "#23406f",
-        shadowOpacity: 12,
-        shadowX: 0,
-        shadowY: 12,
-        shadowBlur: 24,
-        animationName: "none",
-        animationDuration: 600,
-        animationDelay: 0,
-      },
-      textStyle: {
-        color: "#2f5ea7",
-        fontSize: 11,
-        fontWeight: 750,
-        textAlign: "left",
-      },
-    },
-  ],
-};
-
-const visualTemplateStyleDefaults = {
-  layout: {
-    x: 40,
-    y: 40,
-    width: 260,
-    height: 160,
-    zIndex: 1,
-  },
-  style: {
-    fillMode: "solid",
-    backgroundColor: "#ffffff",
-    gradientFrom: "#ffffff",
-    gradientTo: "#eef5ff",
-    gradientAngle: 135,
-    backgroundImage: "",
-    backgroundImageMode: "none",
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    backgroundOverlayColor: "#000000",
-    backgroundOverlayOpacity: 0,
-    borderColor: "#b9c9df",
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 14,
-    minHeight: 120,
-    shadowPreset: "none",
-    shadowColor: "#23406f",
-    shadowOpacity: 12,
-    shadowX: 0,
-    shadowY: 12,
-    shadowBlur: 24,
-    animationName: "none",
-    animationDuration: 600,
-    animationDelay: 0,
-  },
-  textStyle: {
-    color: "#172033",
-    fontSize: 13,
-    fontWeight: 500,
-    textAlign: "left",
-  },
-};
-
-function normalizeVisualTemplateLayout(layout: any, fallback: any = visualTemplateStyleDefaults.layout) {
-  const source = layout && typeof layout === "object" ? layout : {};
-  return {
-    ...fallback,
-    x: Number.isFinite(Number(source.x)) ? Number(source.x) : fallback.x,
-    y: Number.isFinite(Number(source.y)) ? Number(source.y) : fallback.y,
-    width: Number.isFinite(Number(source.width)) ? Number(source.width) : fallback.width,
-    height: Number.isFinite(Number(source.height)) ? Number(source.height) : fallback.height,
-    zIndex: Number.isFinite(Number(source.zIndex)) ? Number(source.zIndex) : fallback.zIndex,
-  };
-}
-
-function normalizeVisualTemplateGridSettings(settings: any) {
-  const source = settings && typeof settings === "object" ? settings : {};
-  const gridSize = Number(source.gridSize);
-  const snapThreshold = Number(source.snapThreshold);
-  const zoom = Number(source.zoom);
-  const columnGuideCount = Number(source.columnGuideCount);
-
-  return {
-    ...visualTemplateGridDefaults,
-    ...source,
-    gridSize: [8, 16, 24].includes(gridSize) ? gridSize : visualTemplateGridDefaults.gridSize,
-    snapThreshold: Number.isFinite(snapThreshold) ? Math.max(1, Math.min(16, snapThreshold)) : visualTemplateGridDefaults.snapThreshold,
-    columnGuideCount: [0, 2, 3, 12].includes(columnGuideCount) ? columnGuideCount : visualTemplateGridDefaults.columnGuideCount,
-    zoom: Number.isFinite(zoom) ? Math.max(0.25, Math.min(4, zoom)) : visualTemplateGridDefaults.zoom,
-    showGrid: source.showGrid !== false,
-    snapToGrid: source.snapToGrid !== false,
-    snapToObjects: source.snapToObjects !== false,
-  };
-}
-
-function normalizeVisualTemplateStyle(style: any, fallback: any = {}) {
-  return {
-    ...fallback,
-    ...(style && typeof style === "object" ? style : {}),
-  };
-}
-
-function hexToRgbColor(hex = "#000000") {
-  const clean = String(hex || "#000000").replace("#", "").trim();
-  const expanded = clean.length === 3
-    ? clean.split("").map((char) => `${char}${char}`).join("")
-    : clean;
-  const value = Number.parseInt(expanded.padEnd(6, "0").slice(0, 6), 16);
-  return {
-    r: (value >> 16) & 255,
-    g: (value >> 8) & 255,
-    b: value & 255,
-  };
-}
-
-function rgbaFromHexColor(hex = "#000000", opacity = 100) {
-  const { r, g, b } = hexToRgbColor(hex);
-  const alpha = Math.max(0, Math.min(100, Number(opacity) || 0)) / 100;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function cssUrlValue(value = "") {
-  const clean = String(value || "").trim();
-  if (!clean) return "";
-  return `url("${clean.replace(/"/g, "%22")}")`;
-}
-
-function normalizeVisualTemplateModel(rawModel: any) {
-  const model = rawModel && typeof rawModel === "object" ? rawModel : {};
-  const artifactType = model.artifactType === "binding" ? "binding" : "template";
-  const template = model.template && typeof model.template === "object"
-    ? model.template
-    : defaultVisualTemplateModel.template;
-  const defaultRegionsById = new Map(defaultVisualTemplateModel.regions.map((region) => [region.id, region]));
-  const regions = Array.isArray(model.regions)
-    ? model.regions.map((region) => {
-        const fallback = defaultRegionsById.get(region?.id) || defaultVisualTemplateModel.regions[0];
-        const normalizedRegion = {
-          ...fallback,
-          ...(region && typeof region === "object" ? region : {}),
-        };
-        return {
-          ...normalizedRegion,
-          kind: normalizedRegion.kind || (normalizedRegion.parentId ? "slot" : "container"),
-          layout: normalizeVisualTemplateLayout(region?.layout, fallback.layout || visualTemplateStyleDefaults.layout),
-          style: normalizeVisualTemplateStyle(region?.style, fallback.style || visualTemplateStyleDefaults.style),
-          textStyle: normalizeVisualTemplateStyle(region?.textStyle, fallback.textStyle || visualTemplateStyleDefaults.textStyle),
-        };
-      })
-    : defaultVisualTemplateModel.regions;
-
-  return {
-    ...defaultVisualTemplateModel,
-    ...model,
-    artifactType,
-    gridSettings: normalizeVisualTemplateGridSettings(model.gridSettings),
-    template,
-    regions,
-  };
-}
-
-function parseVisualTemplateModel(content: string) {
-  try {
-    return normalizeVisualTemplateModel(JSON.parse(String(content || "")));
-  } catch {
-    return normalizeVisualTemplateModel(defaultVisualTemplateModel);
-  }
-}
 const authoringProfileTabPrefix = "system-authoring-profile";
 const validationSessionId = (
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -986,9 +688,13 @@ function elementAllowsText(tagName: string): boolean {
 
 const ditaFileTypes = fallbackDitaSchemaProfile.fileTypes;
 const visualTemplateFileType = { key: "visual-template", label: "Visual Template", extension: "af-template.json" };
+const visualTemplateBindingFileType = { key: "visual-template-binding", label: "Visual Template Binding", extension: "af-binding.json" };
+const nodeBindingTemplateFileType = { key: "node-binding-template", label: "Node Binding Template", extension: "af-node-binding.json" };
 const genericFileTypes = [
   ...ditaFileTypes,
   visualTemplateFileType,
+  visualTemplateBindingFileType,
+  nodeBindingTemplateFileType,
   { key: "text", label: "Text", extension: "txt" },
   { key: "html", label: "HTML", extension: "html" },
   { key: "image", label: "Image", extension: "png" },
@@ -1325,6 +1031,17 @@ function collectProjectFiles(node, pathParts: string[] = []) {
   }
 
   return node.children.flatMap((child) => collectProjectFiles(child, currentPathParts));
+}
+
+function collectProjectFolders(node, pathParts: string[] = []) {
+  const currentPathParts = [...pathParts, node.name];
+  const currentPath = getProjectNodePath(currentPathParts);
+  if (node.type !== "folder") return [];
+
+  return [
+    { node, path: currentPath },
+    ...node.children.flatMap((child) => collectProjectFolders(child, currentPathParts)),
+  ];
 }
 
 function collectValidationFiles(projectTree, fileHistories) {
@@ -2029,12 +1746,12 @@ function getRequiredTemplateChildren(definition: ElementDefinition) {
 
 function normalizeFileName(name, typeKey) {
   const extension = getDocumentTypeFileExtension(typeKey);
-  const trimmed = name.trim() || `new-${typeKey || "file"}`;
+  const trimmed = sanitizeProjectItemName(name, { fallback: `new-${typeKey || "file"}` });
   const extensionSuffix = `.${extension}`;
   const withoutExtension = trimmed.toLowerCase().endsWith(extensionSuffix.toLowerCase())
     ? trimmed.slice(0, -extensionSuffix.length)
     : trimmed.replace(/\.[^./]+$/i, "");
-  return `${withoutExtension}.${extension}`;
+  return `${sanitizeProjectFileNameStem(withoutExtension, extension, `new-${typeKey || "file"}`)}.${extension}`;
 }
 
 function getFileExtension(name = "") {
@@ -2052,8 +1769,18 @@ function getProjectFileKind(file) {
     return "authoring-profile";
   }
 
-  if (file.ditaType === "visual-template" || file.ditaType === "visual-template-binding") {
+  if (
+    file.ditaType === "visual-template" ||
+    file.ditaType === "visual-template-binding" ||
+    file.ditaType === "node-binding-template" ||
+    isVisualTemplateFileName(file.name) ||
+    isVisualTemplateFileName(file.githubPath)
+  ) {
     return "visual-template";
+  }
+
+  if (file.ditaType === "design-system") {
+    return "design-system";
   }
 
   if (file.ditaType === "git-history") {
@@ -2078,6 +1805,10 @@ function getProjectFileKind(file) {
     return "html";
   }
 
+  if (file.ditaType === "asset") {
+    return "asset";
+  }
+
   return "text";
 }
 
@@ -2085,7 +1816,10 @@ function getProjectFileIconKind(file) {
   if (!file || file.type !== "file") return "file";
 
   const extension = getFileExtension(file.name);
-  if (file.ditaType === "visual-template") return "visual-template";
+  const templateArtifactType = getVisualTemplateFileArtifactType(file);
+  if (file.ditaType === "visual-template" || String(file.name || file.githubPath || "").toLowerCase().endsWith(".af-template.json")) return "visual-template";
+  if (templateArtifactType === "binding") return "visual-template-binding";
+  if (templateArtifactType === "node-binding-template") return "node-binding-template";
   if (["topic", "concept", "task", "reference", "map"].includes(file.ditaType)) {
     return file.ditaType;
   }
@@ -2105,6 +1839,28 @@ function getProjectFileIconKind(file) {
 
 function isTextEditableFile(file) {
   return ["xml", "html", "text"].includes(getProjectFileKind(file));
+}
+
+function getImportedLocalFileType(file: File) {
+  const extension = getFileExtension(file.name);
+  if (isVisualTemplateFileName(file.name)) return getVisualTemplateFileArtifactType({ name: file.name });
+  if (/^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)) return "image";
+  if (extension === "ditamap") return "map";
+  if (["dita", "xml"].includes(extension)) return inferBestProjectFileType(file.name);
+  if (["html", "htm"].includes(extension)) return "html";
+  if (["css", "csv", "js", "json", "md", "txt", "yaml", "yml"].includes(extension)) return "text";
+  return "asset";
+}
+
+function getLocalAssetImportRejection(file: File) {
+  const extension = getFileExtension(file.name);
+  if (!extension || !localAssetImportAllowedExtensions.has(extension)) {
+    return `${file.name} is not an allowed file type.`;
+  }
+  if (file.size > localAssetImportMaxBytes) {
+    return `${file.name} is larger than ${Math.round(localAssetImportMaxBytes / 1024 / 1024)} MB.`;
+  }
+  return "";
 }
 
 function slugifyWorkspaceArtifactName(value: string) {
@@ -2164,11 +1920,15 @@ function createGenericFileContent(typeKey: string, name: string) {
 }
 
 function normalizeAssetFileName(name: string, currentName: string) {
-  const trimmed = name.trim() || currentName;
-  if (/\.[^./]+$/.test(trimmed)) return trimmed;
-
   const extension = currentName.match(/(\.[^./]+)$/)?.[1] || "";
-  return `${trimmed}${extension}`;
+  const trimmed = sanitizeProjectItemName(name, { fallback: currentName });
+  if (/\.[^./]+$/.test(trimmed)) {
+    const enteredExtension = trimmed.match(/(\.[^./]+)$/)?.[1] || "";
+    const stem = trimmed.slice(0, -enteredExtension.length);
+    return `${sanitizeProjectFileNameStem(stem, enteredExtension, currentName)}${enteredExtension}`;
+  }
+
+  return `${sanitizeProjectFileNameStem(trimmed, extension, currentName)}${extension}`;
 }
 
 function isDitaDocumentType(typeKey) {
@@ -2247,6 +2007,37 @@ function removeProjectNode(node, id) {
   };
 }
 
+function projectNodeHasGitBackedFile(node) {
+  if (node.type === "file") return Boolean(node.githubPath && node.githubSha);
+  return node.children.some(projectNodeHasGitBackedFile);
+}
+
+function collectGitBackedProjectFileIds(node, ids = new Set<string>()) {
+  if (node.type === "file") {
+    if (node.githubPath && node.githubSha) ids.add(node.id);
+    return ids;
+  }
+
+  node.children.forEach((child) => collectGitBackedProjectFileIds(child, ids));
+  return ids;
+}
+
+function markProjectNodeSubtreeDeleted(node, deletedAt: string) {
+  if (node.type === "file") {
+    return {
+      ...node,
+      deletedAt,
+      draftDirty: Boolean(node.githubPath && node.githubSha) || node.draftDirty,
+    };
+  }
+
+  return {
+    ...node,
+    deletedAt,
+    children: node.children.map((child) => markProjectNodeSubtreeDeleted(child, deletedAt)),
+  };
+}
+
 function cloneProjectNode(node) {
   const nextId = `${node.id}-copy-${Date.now().toString(36)}`;
 
@@ -2270,9 +2061,31 @@ function isDescendantProjectNode(root, id) {
   return root.children.some((child) => child.id === id || isDescendantProjectNode(child, id));
 }
 
+function getProjectPasteDestinationForTarget(root, sourceId, targetId, mode = "copy") {
+  const sourceMatch = sourceId ? findProjectNode(root, sourceId) : null;
+  const targetMatch = targetId ? findProjectNode(root, targetId) : null;
+  if (!sourceMatch || !targetMatch || sourceMatch.node.id === "root") return null;
+
+  const folder = targetMatch.node.type === "folder" ? targetMatch.node : targetMatch.parent;
+  if (!folder || folder.type !== "folder") return null;
+
+  if (mode === "cut") {
+    if (folder.id === sourceMatch.parent?.id) return null;
+    if (folder.id === sourceMatch.node.id || isDescendantProjectNode(sourceMatch.node, folder.id)) return null;
+    const duplicate = folder.children.some((child) => (
+      child.id !== sourceMatch.node.id &&
+      String(child.name || "").trim().toLowerCase() === String(sourceMatch.node.name || "").trim().toLowerCase()
+    ));
+    if (duplicate) return null;
+  }
+
+  return folder;
+}
+
 function inferProjectFileType(fileName: string) {
   const extension = getFileExtension(fileName);
 
+  if (isVisualTemplateFileName(fileName)) return getVisualTemplateFileArtifactType({ name: fileName });
   if (/^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)) return "image";
   if (["ditamap"].includes(extension)) return "map";
   if (["dita", "xml"].includes(extension)) {
@@ -2365,6 +2178,10 @@ function buildProjectTreeFromGitHubEntries(entries: GitHubTreeEntry[]) {
       const pathParts = normalizeProjectPath(entry.path).split("/").filter(Boolean);
       const fileName = pathParts.pop();
       if (!fileName) return;
+      if (fileName === ".folder") {
+        ensureFolder(pathParts.join("/"));
+        return;
+      }
 
       const parent = ensureFolder(pathParts.join("/"));
       parent.children.push({
@@ -2456,6 +2273,17 @@ function getGitHubChildPath(folder, name: string) {
   return normalizeProjectPath([folder.githubPath, name].filter(Boolean).join("/"));
 }
 
+function getProjectPathGuardMessage(path: string) {
+  return getProjectPathLengthMessage(normalizeProjectPath(path));
+}
+
+function getStorageProjectPath(path: string) {
+  const normalizedPath = normalizeProjectPath(path);
+  return normalizedPath.startsWith("content/")
+    ? normalizedPath.slice("content/".length)
+    : normalizedPath;
+}
+
 function rebaseGitHubPath(node, nextPath: string) {
   if (typeof node.githubPath !== "string") return node;
 
@@ -2482,10 +2310,7 @@ function insertProjectNodeInTree(root, targetId, nodeToInsert, placement = "insi
   if (root.id === targetId && root.type === "folder" && placement === "inside") {
     return {
       ...root,
-      children: [...root.children, {
-        ...nodeToInsert,
-        name: makeUniqueName(nodeToInsert.name, root.children, nodeToInsert.id),
-      }],
+      children: [...root.children, nodeToInsert],
     };
   }
 
@@ -2496,12 +2321,8 @@ function insertProjectNodeInTree(root, targetId, nodeToInsert, placement = "insi
   if (targetIndex !== -1 && placement !== "inside") {
     const siblings = root.children.filter((child) => child.id !== nodeToInsert.id);
     const insertIndex = siblings.findIndex((child) => child.id === targetId);
-    const safeNode = {
-      ...nodeToInsert,
-      name: makeUniqueName(nodeToInsert.name, siblings, nodeToInsert.id),
-    };
     const nextChildren = [...siblings];
-    nextChildren.splice(placement === "before" ? insertIndex : insertIndex + 1, 0, safeNode);
+    nextChildren.splice(placement === "before" ? insertIndex : insertIndex + 1, 0, nodeToInsert);
 
     return {
       ...root,
@@ -2515,10 +2336,7 @@ function insertProjectNodeInTree(root, targetId, nodeToInsert, placement = "insi
       if (child.id === targetId && child.type === "folder" && placement === "inside") {
         return {
           ...child,
-          children: [...child.children, {
-            ...nodeToInsert,
-            name: makeUniqueName(nodeToInsert.name, child.children, nodeToInsert.id),
-          }],
+          children: [...child.children, nodeToInsert],
         };
       }
 
@@ -2527,23 +2345,86 @@ function insertProjectNodeInTree(root, targetId, nodeToInsert, placement = "insi
   };
 }
 
+function getProjectMoveDestination(root, sourceId, targetId, placement = "inside") {
+  const targetMatch = findProjectNode(root, targetId);
+  if (!targetMatch) return null;
+
+  if (placement === "inside" && targetMatch.node.type === "folder") {
+    return {
+      folder: targetMatch.node,
+      placement: "inside",
+    };
+  }
+
+  return targetMatch.parent
+    ? {
+        folder: targetMatch.parent,
+        placement: placement === "before" ? "before" : "after",
+      }
+    : null;
+}
+
+function getDuplicateNameInProjectMove(root, sourceId, targetId, placement = "inside") {
+  const sourceMatch = findProjectNode(root, sourceId);
+  if (!sourceMatch) return "";
+
+  const destination = getProjectMoveDestination(root, sourceId, targetId, placement);
+  if (!destination?.folder) return "";
+
+  const normalizedName = String(sourceMatch.node.name || "").trim().toLowerCase();
+  const duplicate = destination.folder.children.some((child) => (
+    child.id !== sourceId &&
+    String(child.name || "").trim().toLowerCase() === normalizedName
+  ));
+
+  return duplicate ? sourceMatch.node.name || "item" : "";
+}
+
+function getProjectMoveDestinationPath(root, sourceId, targetId, placement = "inside") {
+  const sourceMatch = findProjectNode(root, sourceId);
+  if (!sourceMatch) return "";
+
+  const destination = getProjectMoveDestination(root, sourceId, targetId, placement);
+  if (!destination?.folder) return "";
+
+  const folderPath = getProjectFilePath(root, destination.folder.id);
+  return normalizeProjectPath([folderPath, sourceMatch.node.name].filter(Boolean).join("/"));
+}
+
 function moveProjectNodeInTree(root, sourceId, targetId, placement = "inside") {
   if (sourceId === targetId || sourceId === "root") {
-    return { tree: root, moved: false, oldPath: "", newPath: "" };
+    return { tree: root, moved: false, oldPath: "", newPath: "", reason: "" };
   }
 
   const sourceMatch = findProjectNode(root, sourceId);
   const targetMatch = findProjectNode(root, targetId);
-  if (!sourceMatch || !targetMatch) return { tree: root, moved: false, oldPath: "", newPath: "" };
-  if (isDescendantProjectNode(sourceMatch.node, targetId)) return { tree: root, moved: false, oldPath: "", newPath: "" };
+  if (!sourceMatch || !targetMatch) return { tree: root, moved: false, oldPath: "", newPath: "", reason: "" };
+  if (isDescendantProjectNode(sourceMatch.node, targetId)) {
+    return { tree: root, moved: false, oldPath: "", newPath: "", reason: "A folder cannot be moved into itself." };
+  }
+
+  const actualPlacement = placement === "inside" && targetMatch.node.type !== "folder" ? "after" : placement;
+  const duplicateName = getDuplicateNameInProjectMove(root, sourceId, targetId, actualPlacement);
+  if (duplicateName) {
+    return {
+      tree: root,
+      moved: false,
+      oldPath: "",
+      newPath: "",
+      reason: `A file or folder named "${duplicateName}" already exists in that folder.`,
+    };
+  }
 
   const oldPath = getProjectFilePath(root, sourceId);
+  const movedNodePath = getProjectMoveDestinationPath(root, sourceId, targetId, actualPlacement);
+  const movedNode = movedNodePath
+    ? rebaseGitHubPath(sourceMatch.node, getStorageProjectPath(movedNodePath))
+    : sourceMatch.node;
   const withoutSource = removeProjectNode(root, sourceId);
   const adjustedTarget = findProjectNode(withoutSource, targetId);
-  if (!adjustedTarget) return { tree: root, moved: false, oldPath: "", newPath: "" };
+  if (!adjustedTarget) return { tree: root, moved: false, oldPath: "", newPath: "", reason: "" };
 
-  const actualPlacement = placement === "inside" && adjustedTarget.node.type !== "folder" ? "after" : placement;
-  const movedTree = insertProjectNodeInTree(withoutSource, targetId, sourceMatch.node, actualPlacement);
+  const movedTree = insertProjectNodeInTree(withoutSource, targetId, movedNode, actualPlacement);
   const newPath = getProjectFilePath(movedTree, sourceId);
 
   return {
@@ -2551,6 +2432,7 @@ function moveProjectNodeInTree(root, sourceId, targetId, placement = "inside") {
     moved: true,
     oldPath,
     newPath,
+    reason: "",
   };
 }
 
@@ -2592,6 +2474,24 @@ function collectProjectFileIds(node, ids = new Set<string>()) {
   }
 
   return ids;
+}
+
+function isProjectPathInside(sourcePath: string, targetPath: string) {
+  const normalizedSource = normalizeProjectPath(sourcePath);
+  const normalizedTarget = normalizeProjectPath(targetPath);
+  return normalizedSource === normalizedTarget || normalizedSource.startsWith(`${normalizedTarget}/`);
+}
+
+function getPrunedProjectSelection(root, selectedIds: Iterable<string>) {
+  const matches = Array.from(new Set(Array.from(selectedIds)))
+    .map((id) => findProjectNode(root, id))
+    .filter((match) => match && match.node.id !== "root");
+
+  return matches.filter((match) => (
+    !matches.some((candidate) => (
+      candidate.node.id !== match.node.id && isDescendantProjectNode(candidate.node, match.node.id)
+    ))
+  ));
 }
 
 function getReadableSize(length = 0) {
@@ -5787,6 +5687,7 @@ function App() {
   const [activeFileId, setActiveFileId] = useState(null);
   const [activePaneId, setActivePaneId] = useState("pane-left");
   const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
   const [tabPanes, setTabPanes] = useState([
     { id: "pane-left", label: "Left", tabs: [], activeFileId: null },
   ]);
@@ -5797,6 +5698,7 @@ function App() {
   const [newItemName, setNewItemName] = useState(getDefaultFileStem("topic"));
   const [newItemType, setNewItemType] = useState("topic");
   const [explorerMessage, setExplorerMessage] = useState("");
+  const [draggingProjectNodeId, setDraggingProjectNodeId] = useState("");
   const [mode, setMode] = useState("visual");
   const [activeLeftPanel, setActiveLeftPanel] = useState<"explorer" | "doc" | "git" | null>("explorer");
   const [lastLeftPanel, setLastLeftPanel] = useState<"explorer" | "doc" | "git">("explorer");
@@ -5837,10 +5739,13 @@ function App() {
   const [paneSplitDirection, setPaneSplitDirection] = useState("right");
   const [editorLeftOverlap, setEditorLeftOverlap] = useState(0);
   const [editorRightOverlap, setEditorRightOverlap] = useState(0);
+  const [editorFileDropActive, setEditorFileDropActive] = useState(false);
   const [pendingFocusPath, setPendingFocusPath] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [tabContextMenu, setTabContextMenu] = useState(null);
   const [projectContextMenu, setProjectContextMenu] = useState(null);
+  const [projectClipboardNodeId, setProjectClipboardNodeId] = useState<string | null>(null);
+  const [projectClipboardMode, setProjectClipboardMode] = useState<"copy" | "cut">("copy");
   const [projectPropertiesNodeId, setProjectPropertiesNodeId] = useState<string | null>(null);
   const [gitCommitContextMenu, setGitCommitContextMenu] = useState(null);
   const [editingProjectNodeId, setEditingProjectNodeId] = useState<string | null>(null);
@@ -5905,6 +5810,12 @@ function App() {
     description: "",
   });
   const [visualTemplateModel, setVisualTemplateModel] = useState<any>(defaultVisualTemplateModel);
+  const [designSystem, setDesignSystem] = useState<DesignSystem>(fallbackDesignSystem);
+  const [designSystemDraft, setDesignSystemDraft] = useState<DesignSystem>(fallbackDesignSystem);
+  const [designSystemStatus, setDesignSystemStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [designSystemSaveStatus, setDesignSystemSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [designSystemMessage, setDesignSystemMessage] = useState("");
+  const designSystemScrollRef = useRef<HTMLDivElement | null>(null);
   const [visualTemplatePickerMode, setVisualTemplatePickerMode] = useState<"create" | "open" | null>(null);
   const [visualTemplateCreationTarget, setVisualTemplateCreationTarget] = useState<null | {
     folderId: string;
@@ -5914,6 +5825,8 @@ function App() {
   const [visualTemplateSaveAsOpen, setVisualTemplateSaveAsOpen] = useState(false);
   const [visualTemplateUploadOpen, setVisualTemplateUploadOpen] = useState(false);
   const [visualTemplateImportOpen, setVisualTemplateImportOpen] = useState(false);
+  const [nodeBindingTemplateDialogOpen, setNodeBindingTemplateDialogOpen] = useState(false);
+  const [visualTemplateAssetPickerOpen, setVisualTemplateAssetPickerOpen] = useState(false);
   const [visualTemplateSourceId, setVisualTemplateSourceId] = useState<string | null>(null);
   const [visualTemplateDropRegionId, setVisualTemplateDropRegionId] = useState<string | null>(null);
   const [visualTemplateSelectedRegionId, setVisualTemplateSelectedRegionId] = useState<string | null>("hero");
@@ -5921,12 +5834,24 @@ function App() {
   const [visualTemplateEditingLabel, setVisualTemplateEditingLabel] = useState("");
   const [visualTemplateMoveModifierActive, setVisualTemplateMoveModifierActive] = useState(false);
   const [visualTemplateLayerDragId, setVisualTemplateLayerDragId] = useState<string | null>(null);
+  const [visualTemplateLayerContextMenu, setVisualTemplateLayerContextMenu] = useState<null | {
+    x: number;
+    y: number;
+    regionId: string;
+  }>(null);
   const [visualTemplateDeleteDropActive, setVisualTemplateDeleteDropActive] = useState(false);
   const [visualTemplateLayerSearch, setVisualTemplateLayerSearch] = useState("");
+  const [visualTemplateRegionNameDrafts, setVisualTemplateRegionNameDrafts] = useState<Record<string, string>>({});
+  const [visualTemplateRegionNameError, setVisualTemplateRegionNameError] = useState<{ regionId: string; message: string } | null>(null);
   const [visualTemplateExpandedLayerIds, setVisualTemplateExpandedLayerIds] = useState<Set<string>>(() => new Set(["hero", "body", "sidebar"]));
+  const visualTemplateStageRef = useRef<HTMLDivElement | null>(null);
   const visualTemplatePreviewRef = useRef<HTMLDivElement | null>(null);
+  const visualTemplateRegionNameInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [visualTemplateSmartGuides, setVisualTemplateSmartGuides] = useState<Array<{ axis: "x" | "y"; value: number; from: number; to: number; label?: string }>>([]);
   const [visualTemplateMeasureMode, setVisualTemplateMeasureMode] = useState(false);
+  const [visualTemplatePreviewMode, setVisualTemplatePreviewMode] = useState(false);
+  const [visualTemplatePreviewSize, setVisualTemplatePreviewSize] = useState<"desktop" | "tablet" | "phone">("desktop");
+  const visualTemplateEditZoomBeforePreviewRef = useRef<number | null>(null);
   const [visualTemplateMeasurement, setVisualTemplateMeasurement] = useState<{
     startX: number;
     startY: number;
@@ -5964,6 +5889,16 @@ function App() {
     width: number;
   }>>([]);
 
+  const designTokensByKey = useMemo(() => getTokenMap(designSystem.tokens), [designSystem.tokens]);
+
+  useEffect(() => {
+    if (designSystemSaveStatus !== "saved" || !designSystemMessage) return undefined;
+    const timer = window.setTimeout(() => {
+      setDesignSystemMessage("");
+    }, 3600);
+    return () => window.clearTimeout(timer);
+  }, [designSystemMessage, designSystemSaveStatus]);
+
   useEffect(() => {
     visualTemplateModelRef.current = visualTemplateModel;
   }, [visualTemplateModel]);
@@ -5987,6 +5922,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!projectClipboardNodeId) return;
+
+    function handleProjectClipboardEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+
+      setProjectClipboardNodeId(null);
+      setProjectClipboardMode("copy");
+      setExplorerSystemMessage("Cleared Explorer clipboard.");
+    }
+
+    document.addEventListener("keydown", handleProjectClipboardEscape, true);
+    return () => document.removeEventListener("keydown", handleProjectClipboardEscape, true);
+  }, [projectClipboardNodeId]);
+
+  useEffect(() => {
     if (!visualTemplateLayoutDrag) return;
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -5994,11 +5944,12 @@ function App() {
       const dx = (event.clientX - visualTemplateLayoutDrag.startX) / gridSettings.zoom;
       const dy = (event.clientY - visualTemplateLayoutDrag.startY) / gridSettings.zoom;
       const startLayout = normalizeVisualTemplateLayout(visualTemplateLayoutDrag.layout);
+      const dragContext = getVisualTemplateSnapContext(visualTemplateLayoutDrag.id);
       const rawUpdates = visualTemplateLayoutDrag.mode === "resize"
-        ? getVisualTemplateResizeLayout(startLayout, dx, dy, visualTemplateLayoutDrag.handle || "se", visualTemplateLayoutDrag.kind)
+        ? getVisualTemplateResizeLayout(startLayout, dx, dy, visualTemplateLayoutDrag.handle || "se", visualTemplateLayoutDrag.kind, dragContext)
         : {
-            x: Math.max(0, Math.min(visualTemplatePageSize.width - startLayout.width, startLayout.x + dx)),
-            y: Math.max(0, Math.min(visualTemplatePageSize.height - startLayout.height, startLayout.y + dy)),
+            x: Math.max(0, Math.min(Math.max(0, dragContext.width - startLayout.width), startLayout.x + dx)),
+            y: Math.max(0, Math.min(Math.max(0, dragContext.height - startLayout.height), startLayout.y + dy)),
           };
       const snapped = resolveVisualTemplateSnappedLayout(
         visualTemplateLayoutDrag.id,
@@ -6031,6 +5982,7 @@ function App() {
   const pendingFocusPlacementRef = useRef<"start" | "end">("end");
   const sourceHighlightRef = useRef(null);
   const sourceEditBaseRef = useRef(null);
+  const projectSelectionAnchorRef = useRef<string | null>(null);
   const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
   const realtimeStreamRef = useRef<MediaStream | null>(null);
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
@@ -6061,10 +6013,20 @@ function App() {
   } | null>(null);
   const activeFile = findProjectNode(projectTree, activeFileId)?.node;
   const activeFileKind = getProjectFileKind(activeFile);
+  const activeVisualTemplateContent = activeFileId
+    ? fileHistories[activeFileId]?.present || activeFile?.content || ""
+    : "";
+  const activeVisualTemplateArtifactType = activeFileKind === "visual-template"
+    ? getVisualTemplateFileArtifactType(activeFile, activeVisualTemplateContent)
+    : "";
   const activeIsVisualTemplate = activeFileId === visualTemplatesTabId || activeFileKind === "visual-template";
   const activeIsVisualTemplateBinding = activeIsVisualTemplate && (
-    activeFile?.ditaType === "visual-template-binding" ||
-    visualTemplateModel.artifactType === "binding"
+    isVisualTemplateBindingArtifactType(activeVisualTemplateArtifactType) ||
+    isVisualTemplateBindingArtifactType(visualTemplateModel.artifactType)
+  );
+  const activeVisualTemplateStructureLocked = activeIsVisualTemplate && (
+    isVisualTemplateStructureLockedArtifactType(activeVisualTemplateArtifactType) ||
+    isVisualTemplateStructureLockedArtifactType(visualTemplateModel.artifactType)
   );
   const activeIsTextEditable = isTextEditableFile(activeFile);
   const activeIsXml = activeFileKind === "xml";
@@ -6097,6 +6059,14 @@ function App() {
 
   const parsed = useMemo(() => (activeIsXml ? parseXml(xml) : { doc: null, error: null }), [activeIsXml, xml]);
   const activeDitaRootName = parsed.doc?.documentElement?.tagName || "";
+  const activeIsDitaFile = useMemo(() => {
+    if (!activeFile || !activeIsXml) return false;
+    const extension = getFileExtension(activeFile.name);
+    if (isDitaDocumentType(activeFile.ditaType) || ["dita", "ditamap"].includes(extension)) {
+      return true;
+    }
+    return Boolean(activeDitaRootName && getActiveDitaSchemaProfile().elements[activeDitaRootName]);
+  }, [activeDitaRootName, activeFile, activeIsXml, schemaProfileVersion]);
   const issues = useMemo(() => (parsed.doc ? validateDita(parsed.doc) : []), [parsed.doc, schemaProfileVersion]);
   const brokenSchemaTagNames = useMemo(() => getBrokenSchemaTagNames(issues), [issues]);
   const selectedNode = parsed.doc ? getNodeByPath(parsed.doc, selectedPath) : null;
@@ -6145,6 +6115,7 @@ function App() {
   const canUndo = history.past.length > 0;
   const canRedo = history.future.length > 0;
   const openTabs = tabPanes.flatMap((pane) => pane.tabs.map((fileId) => ({ fileId, paneId: pane.id })));
+  const openTabCount = openTabs.length;
   const activeGitBranchName = gitBranches.find((branch) => branch.active)?.name ||
     githubStatus?.selectedRepository?.selected_branch ||
     githubStatus?.selectedRepository?.default_branch ||
@@ -6199,7 +6170,7 @@ function App() {
 
     fetch(`${backendBaseUrl}/api/schema/dita?type=${encodeURIComponent(schemaRootName)}&refresh=1`)
       .then(async (response) => {
-        const body = await response.json();
+        const body = await readBackendJson(response);
         if (!response.ok) {
           throw new Error(body.error || `Could not load ${schemaRootName} schema.`);
         }
@@ -6366,7 +6337,7 @@ function App() {
           source: notification.source,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not save notification.");
@@ -6399,7 +6370,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/notifications`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load notifications.");
@@ -6436,7 +6407,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/authoring-profiles`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load Customize Types profiles.");
@@ -6480,7 +6451,7 @@ function App() {
         },
         body: JSON.stringify({ profiles }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not save Customize Types profiles.");
@@ -6500,6 +6471,335 @@ function App() {
     }
   }
 
+  async function loadDesignSystem() {
+    if (!isAuthenticated || appAccountStatus !== "ready") return;
+
+    setDesignSystemStatus("loading");
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/design-system`, {
+        headers: await getBackendAuthHeaders(),
+      });
+      const body = await readBackendJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not load design tokens.");
+      }
+
+      const nextDesignSystem = normalizeDesignSystem(body);
+      setDesignSystem(nextDesignSystem);
+      setDesignSystemDraft(nextDesignSystem);
+      setDesignSystemStatus("ready");
+    } catch (error) {
+      setDesignSystem(fallbackDesignSystem);
+      setDesignSystemStatus("error");
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not load design tokens.", {
+        source: "DESIGN",
+        level: "warning",
+        open: false,
+      });
+    }
+  }
+
+  const designTokenTypes: DesignTokenType[] = [
+    "color",
+    "space",
+    "radius",
+    "border",
+    "shadow",
+    "font-size",
+    "font-family",
+    "font-weight",
+    "number",
+    "asset",
+  ];
+  const fontFamilyOptions = [
+    "Inter",
+    "Arial",
+    "Helvetica",
+    "Georgia",
+    "Times New Roman",
+    "Verdana",
+    "Tahoma",
+    "Trebuchet MS",
+    "Courier New",
+    "SF Pro Text",
+    "SFMono-Regular",
+  ];
+  const fontWeightOptions = ["300", "400", "500", "600", "700", "800", "900"];
+  const tokenUnitOptions: Partial<Record<DesignTokenType, string[]>> = {
+    "font-size": ["px", "rem", "em", "pt"],
+    radius: ["px", "rem", "em", "%"],
+    space: ["px", "rem", "em", "%"],
+    border: ["px", "rem", "em", "pt"],
+  };
+  const styleClassTargets: StyleClassTarget[] = ["container", "slot", "dita", "both"];
+
+  function parseDimensionTokenValue(value: string, defaultUnit: string) {
+    const trimmedValue = value.trim();
+    const match = trimmedValue.match(/^(-?\d+(?:\.\d+)?)([a-z%]*)$/i);
+    if (!match) {
+      return { amount: "", unit: defaultUnit };
+    }
+    return {
+      amount: match[1],
+      unit: match[2] || defaultUnit,
+    };
+  }
+
+  function getDefaultDesignTokenValue(type: DesignTokenType) {
+    if (type === "color") return "#ffffff";
+    if (type === "font-family") return fontFamilyOptions[0];
+    if (type === "font-weight") return "400";
+    if (type === "font-size") return "13px";
+    if (type === "radius" || type === "space") return "8px";
+    if (type === "border") return "1px";
+    if (type === "number") return "8";
+    if (type === "shadow") return "0 12px 32px rgba(23, 32, 51, 0.12)";
+    return "";
+  }
+
+  function preserveDesignSystemScroll() {
+    const surface = designSystemScrollRef.current;
+    if (!surface) return;
+    const scrollTop = surface.scrollTop;
+    const scrollLeft = surface.scrollLeft;
+    const restore = () => {
+      surface.scrollTop = scrollTop;
+      surface.scrollLeft = scrollLeft;
+    };
+    requestAnimationFrame(restore);
+    window.setTimeout(restore, 0);
+    window.setTimeout(restore, 80);
+  }
+
+  function updateDesignToken(index: number, patch: Partial<DesignToken>) {
+    preserveDesignSystemScroll();
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      tokens: current.tokens.map((token, tokenIndex) => (
+        tokenIndex === index ? { ...token, ...patch } : token
+      )),
+    }));
+  }
+
+  function addDesignToken() {
+    const existingKeys = new Set(designSystemDraft.tokens.map((token) => token.key));
+    let suffix = designSystemDraft.tokens.length + 1;
+    let key = `custom.token.${suffix}`;
+    while (existingKeys.has(key)) {
+      suffix += 1;
+      key = `custom.token.${suffix}`;
+    }
+    setDesignSystemDraft((current) => ({
+      ...current,
+      tokens: [
+        ...current.tokens,
+        { key, type: "color", value: "#ffffff", description: "" },
+      ],
+    }));
+  }
+
+  function removeDesignToken(index: number) {
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      tokens: current.tokens.filter((_, tokenIndex) => tokenIndex !== index),
+    }));
+  }
+
+  function updateDesignStyleClass(index: number, patch: Partial<StyleClass>) {
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: current.styleClasses.map((styleClass, styleIndex) => (
+        styleIndex === index ? { ...styleClass, ...patch } : styleClass
+      )),
+    }));
+  }
+
+  function updateDesignStyleProperty(
+    index: number,
+    field: "style" | "textStyle",
+    property: string,
+    value: string,
+  ) {
+    preserveDesignSystemScroll();
+    const orderField = field === "style" ? "styleOrder" : "textStyleOrder";
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: current.styleClasses.map((styleClass, styleIndex) => {
+        if (styleIndex !== index) return styleClass;
+        const nextProperties = { ...((styleClass[field] || {}) as Record<string, unknown>) };
+        const nextOrder = [...(styleClass[orderField] || Object.keys(nextProperties))];
+        if (value) {
+          nextProperties[property] = value;
+          if (!nextOrder.includes(property)) {
+            nextOrder.push(property);
+          }
+        } else {
+          delete nextProperties[property];
+          const propertyIndex = nextOrder.indexOf(property);
+          if (propertyIndex >= 0) {
+            nextOrder.splice(propertyIndex, 1);
+          }
+        }
+        return { ...styleClass, [field]: nextProperties, [orderField]: nextOrder };
+      }),
+    }));
+  }
+
+  function commitDesignStylePropertyValue(
+    select: HTMLSelectElement,
+    index: number,
+    field: "style" | "textStyle",
+    property: string,
+  ) {
+    const value = select.value;
+    select.blur();
+    preserveDesignSystemScroll();
+    window.setTimeout(() => updateDesignStyleProperty(index, field, property, value), 0);
+  }
+
+  function renameDesignStyleProperty(
+    index: number,
+    field: "style" | "textStyle",
+    oldProperty: string,
+    nextProperty: string,
+  ) {
+    if (!nextProperty || oldProperty === nextProperty) return;
+    const orderField = field === "style" ? "styleOrder" : "textStyleOrder";
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: current.styleClasses.map((styleClass, styleIndex) => {
+        if (styleIndex !== index) return styleClass;
+        const currentProperties = { ...((styleClass[field] || {}) as Record<string, unknown>) };
+        if (Object.prototype.hasOwnProperty.call(currentProperties, nextProperty)) {
+          return styleClass;
+        }
+        const value = currentProperties[oldProperty];
+        delete currentProperties[oldProperty];
+        currentProperties[nextProperty] = value ?? "";
+        const currentOrder = styleClass[orderField] || Object.keys(styleClass[field] || {});
+        const nextOrder = currentOrder.map((property) => (
+          property === oldProperty ? nextProperty : property
+        ));
+        if (!nextOrder.includes(nextProperty)) {
+          nextOrder.push(nextProperty);
+        }
+        return { ...styleClass, [field]: currentProperties, [orderField]: nextOrder };
+      }),
+    }));
+  }
+
+  function removeDesignStyleProperty(index: number, field: "style" | "textStyle", property: string) {
+    const orderField = field === "style" ? "styleOrder" : "textStyleOrder";
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: current.styleClasses.map((styleClass, styleIndex) => {
+        if (styleIndex !== index) return styleClass;
+        const currentProperties = { ...((styleClass[field] || {}) as Record<string, unknown>) };
+        delete currentProperties[property];
+        return {
+          ...styleClass,
+          [field]: currentProperties,
+          [orderField]: (styleClass[orderField] || []).filter((item) => item !== property),
+        };
+      }),
+    }));
+  }
+
+  function removeDesignStyleClass(index: number) {
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: current.styleClasses.filter((_, styleIndex) => styleIndex !== index),
+    }));
+  }
+
+  function addDesignStyleClass() {
+    const existingKeys = new Set(designSystemDraft.styleClasses.map((styleClass) => styleClass.key));
+    let suffix = designSystemDraft.styleClasses.length + 1;
+    let key = `af-custom-${suffix}`;
+    while (existingKeys.has(key)) {
+      suffix += 1;
+      key = `af-custom-${suffix}`;
+    }
+    setDesignSystemDraft((current) => ({
+      ...current,
+      styleClasses: [
+        ...current.styleClasses,
+        {
+          key,
+          displayName: "Custom Style",
+          description: "",
+          appliesTo: "both",
+          style: { backgroundColor: "color.surface.page", borderColor: "color.border.soft", borderStyle: "solid", borderRadius: "radius.region" },
+          styleOrder: ["backgroundColor", "borderColor", "borderStyle", "borderRadius"],
+          textStyle: { color: "color.text.primary" },
+          textStyleOrder: ["color"],
+        },
+      ],
+    }));
+  }
+
+  async function saveDesignSystemDraft() {
+    if (!isAuthenticated) {
+      setDesignSystemSaveStatus("error");
+      setDesignSystemMessage("Sign in before saving the design system.");
+      return;
+    }
+
+    if (appAccountStatus !== "ready") {
+      setDesignSystemSaveStatus("error");
+      setDesignSystemMessage("Your workspace account is still loading. Try again in a moment.");
+      return;
+    }
+
+    setDesignSystemSaveStatus("saving");
+    setDesignSystemMessage("");
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/design-system`, {
+        method: "PUT",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(designSystemDraft),
+      });
+      const responseText = await response.text();
+      let body: Record<string, unknown> = {};
+      if (responseText) {
+        try {
+          body = JSON.parse(responseText) as Record<string, unknown>;
+        } catch {
+          body = { error: responseText };
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(typeof body.error === "string" ? body.error : "Could not save design system.");
+      }
+
+      const savedDesignSystem = normalizeDesignSystem(body);
+      setDesignSystem(savedDesignSystem);
+      setDesignSystemDraft(savedDesignSystem);
+      setDesignSystemSaveStatus("saved");
+      setDesignSystemMessage("Design system saved for this team.");
+      appendTerminalMessage("Design system saved for this team.", {
+        source: "DESIGN",
+        level: "info",
+        open: false,
+      });
+    } catch (error) {
+      setDesignSystemSaveStatus("error");
+      setDesignSystemMessage(error instanceof Error ? error.message : "Could not save design system.");
+    }
+  }
+
   async function loadSpecializations() {
     if (!isAuthenticated || appAccountStatus !== "ready") return;
 
@@ -6509,7 +6809,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/specializations`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load specializations.");
@@ -6795,7 +7095,7 @@ function App() {
         },
         body: JSON.stringify(specializationPayload()),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not preview specialization.");
@@ -6826,7 +7126,7 @@ function App() {
         },
         body: JSON.stringify(specializationPayload()),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not save specialization.");
@@ -6860,7 +7160,7 @@ function App() {
         method: "POST",
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not validate specialization.");
@@ -6929,36 +7229,76 @@ function App() {
     ...(hasSecondaryPane && paneSplitDirection === "down"
       ? { gridTemplateRows: `minmax(160px, ${paneSplitPercent}fr) 6px minmax(280px, ${100 - paneSplitPercent}fr)` }
       : {}),
-    marginLeft: activeLeftPanel ? -editorLeftOverlap : 0,
+    marginLeft: 0,
     marginRight: activeSidePanel ? -editorRightOverlap : 0,
-    zIndex: (activeLeftPanel && editorLeftOverlap) || editorRightOverlap ? 2 : undefined,
+    zIndex: editorRightOverlap ? 2 : undefined,
   };
   const workspaceStyle = {
     gridTemplateColumns: [
-      "46px",
-      ...(activeLeftPanel ? ["260px", "6px"] : ["0px", "0px"]),
+      "54px",
+      ...(activeLeftPanel ? [`${260 + editorLeftOverlap}px`, "6px"] : ["0px", "0px"]),
       "minmax(520px, 1fr)",
       ...(activeSidePanel ? ["6px", "260px"] : ["0px", "0px"]),
-      "46px",
+      "54px",
     ].join(" "),
   };
   const navigatorResizerStyle = {
-    transform: `translateX(${-editorLeftOverlap}px)`,
+    transform: "translateX(0)",
   };
   const inspectorResizerStyle = {
     transform: `translateX(${editorRightOverlap}px)`,
   };
   const renderedLeftPanel = activeLeftPanel || lastLeftPanel;
-  const renderedSidePanel = activeSidePanel || lastSidePanel;
-  const visualTemplateSidePanels: SidePanelId[] = activeIsVisualTemplateBinding
-    ? ["templateSources", "templateBindings", "templateLayers", "templateLayout", "templateStyle", "notifications"]
-    : ["templateLayers", "templateLayout", "templateStyle", "notifications"];
-  const defaultSidePanels: SidePanelId[] = ["inspector", "schema", "search", "chat", "aiReview", "github", "notifications", "help"];
-  const visibleSidePanels = activeIsVisualTemplate ? visualTemplateSidePanels : defaultSidePanels;
+  const visualTemplateSidePanels = useMemo<SidePanelId[]>(
+    () => activeVisualTemplateStructureLocked
+      ? ["templateSources", "templateBindings", "notifications"]
+      : ["templateLayers", "templateLayout", "templateStyle", "notifications"],
+    [activeVisualTemplateStructureLocked],
+  );
+  const defaultSidePanels = useMemo<SidePanelId[]>(
+    () => activeIsDitaFile
+      ? ["inspector", "schema", "search", "chat", "aiReview", "github", "notifications", "help"]
+      : ["search", "chat", "aiReview", "github", "notifications", "help"],
+    [activeIsDitaFile],
+  );
+  const visibleSidePanels = useMemo<SidePanelId[]>(
+    () => activeIsVisualTemplate ? visualTemplateSidePanels : defaultSidePanels,
+    [activeIsVisualTemplate, defaultSidePanels, visualTemplateSidePanels],
+  );
+  const renderedSidePanel = activeSidePanel || (lastSidePanel && visibleSidePanels.includes(lastSidePanel) ? lastSidePanel : null);
+
+  useEffect(() => {
+    if (!openTabCount && editorFileDropActive) {
+      setEditorFileDropActive(false);
+    }
+  }, [editorFileDropActive, openTabCount]);
+
+  useEffect(() => {
+    const clearEditorDropState = () => setEditorFileDropActive(false);
+    const clearWhenLeavingWindow = (event: DragEvent) => {
+      if (
+        event.clientX <= 0 ||
+        event.clientY <= 0 ||
+        event.clientX >= window.innerWidth ||
+        event.clientY >= window.innerHeight
+      ) {
+        setEditorFileDropActive(false);
+      }
+    };
+
+    window.addEventListener("drop", clearEditorDropState, true);
+    window.addEventListener("dragend", clearEditorDropState, true);
+    window.addEventListener("dragleave", clearWhenLeavingWindow, true);
+    return () => {
+      window.removeEventListener("drop", clearEditorDropState, true);
+      window.removeEventListener("dragend", clearEditorDropState, true);
+      window.removeEventListener("dragleave", clearWhenLeavingWindow, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeSidePanel && !visibleSidePanels.includes(activeSidePanel)) {
-      setActiveSidePanel(activeIsVisualTemplate ? "templateLayers" : null);
+      setActiveSidePanel(activeIsVisualTemplate ? visibleSidePanels[0] || null : null);
     }
   }, [activeIsVisualTemplate, activeSidePanel, visibleSidePanels]);
 
@@ -6977,7 +7317,7 @@ function App() {
       },
       body: JSON.stringify({ segments }),
     });
-    const body = await response.json();
+    const body = await readBackendJson(response);
 
     if (!response.ok) {
       throw new Error(body.error || "Spelling check failed.");
@@ -7157,7 +7497,7 @@ function App() {
             Authorization: `Bearer ${token}`,
           },
         });
-        const body = await response.json();
+        const body = await readBackendJson(response);
 
         if (!response.ok) {
           throw new Error(body.error || "Could not sync the signed-in user.");
@@ -7188,11 +7528,14 @@ function App() {
       loadNotifications();
       loadSpecializations();
       loadAuthoringProfiles();
+      loadDesignSystem();
     } else if (!isAuthenticated) {
       setNotifications([]);
       setNotificationStatus("idle");
       setSpecializations([]);
       setActiveSpecializationDefinitions([]);
+      setDesignSystem(fallbackDesignSystem);
+      setDesignSystemStatus("idle");
       authoringProfilesLoadedRef.current = false;
       lastSavedAuthoringProfilesRef.current = "";
       setSchemaProfileVersion((version) => version + 1);
@@ -7214,6 +7557,23 @@ function App() {
 
     defaultExplorerSelectionRef.current = true;
     setSelectedProjectId(contentFolder.node.id);
+    setSelectedProjectIds(new Set([contentFolder.node.id]));
+  }, [projectTree, selectedProjectId]);
+
+  useEffect(() => {
+    setSelectedProjectIds((current) => {
+      const next = new Set<string>();
+      current.forEach((id) => {
+        if (findProjectNode(projectTree, id)) next.add(id);
+      });
+      return next.size === current.size ? current : next;
+    });
+    if (selectedProjectId && !findProjectNode(projectTree, selectedProjectId)) {
+      const fallback = findFirstVisibleFile(projectTree)?.id || "root";
+      setSelectedProjectId(fallback);
+      setSelectedProjectIds(new Set([fallback]));
+      projectSelectionAnchorRef.current = fallback;
+    }
   }, [projectTree, selectedProjectId]);
 
   useEffect(() => {
@@ -7336,6 +7696,55 @@ function App() {
   }, [projectContextMenu]);
 
   useEffect(() => {
+    if (activeLeftPanel !== "explorer" || selectedProjectIds.size === 0) return;
+
+    function handleExplorerKeyboardShortcut(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const explorerRoot = target?.closest(".navigator.left-panel");
+      if (!explorerRoot) return;
+
+      if (event.shiftKey && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        const visibleIds = Array.from(explorerRoot.querySelectorAll<HTMLElement>("[data-project-node-id]"))
+          .map((element) => element.dataset.projectNodeId || "")
+          .filter(Boolean);
+        const currentId = selectedProjectId || projectSelectionAnchorRef.current || visibleIds[0] || "";
+        const currentIndex = visibleIds.indexOf(currentId);
+        if (currentIndex === -1) return;
+
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex = Math.max(0, Math.min(visibleIds.length - 1, currentIndex + direction));
+        const nextId = visibleIds[nextIndex];
+        const anchorId = projectSelectionAnchorRef.current || currentId;
+        const anchorIndex = visibleIds.indexOf(anchorId);
+        if (!nextId || anchorIndex === -1) return;
+
+        const start = Math.min(anchorIndex, nextIndex);
+        const end = Math.max(anchorIndex, nextIndex);
+
+        event.preventDefault();
+        event.stopPropagation();
+        setSelectedProjectId(nextId);
+        setSelectedProjectIds(new Set(visibleIds.slice(start, end + 1)));
+        const nextRow = explorerRoot.querySelector<HTMLElement>(`[data-project-node-id="${CSS.escape(nextId)}"] > button`);
+        nextRow?.focus();
+        return;
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteProjectItemsByIds(selectedProjectIds);
+      }
+    }
+
+    document.addEventListener("keydown", handleExplorerKeyboardShortcut, true);
+    return () => document.removeEventListener("keydown", handleExplorerKeyboardShortcut, true);
+  }, [activeLeftPanel, selectedProjectId, selectedProjectIds, projectTree, tabPanes, activeFileId, activePaneId]);
+
+  useEffect(() => {
     if (!gitCommitContextMenu) return;
 
     function handlePointerDown(event) {
@@ -7360,6 +7769,32 @@ function App() {
       document.removeEventListener("keydown", handleEscape, true);
     };
   }, [gitCommitContextMenu]);
+
+  useEffect(() => {
+    if (!visualTemplateLayerContextMenu) return;
+
+    function handlePointerDown(event) {
+      if (event.target instanceof Element && event.target.closest(".visual-layer-context-menu")) {
+        return;
+      }
+
+      setVisualTemplateLayerContextMenu(null);
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setVisualTemplateLayerContextMenu(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleEscape, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleEscape, true);
+    };
+  }, [visualTemplateLayerContextMenu]);
 
   useEffect(() => {
     if (!fileTypePicker) return;
@@ -7401,6 +7836,49 @@ function App() {
     setDocumentHighlightPathKey(pathKeyFor(path));
   }
 
+  function selectProjectExplorerNode(nodeId: string, event?: React.MouseEvent<HTMLElement>) {
+    setSelectedProjectId(nodeId);
+
+    if (event?.ctrlKey || event?.metaKey) {
+      projectSelectionAnchorRef.current = nodeId;
+      setSelectedProjectIds((current) => {
+        const next = new Set(current);
+        if (next.has(nodeId)) {
+          next.delete(nodeId);
+        } else {
+          next.add(nodeId);
+        }
+        if (next.size === 0) next.add(nodeId);
+        return next;
+      });
+      return;
+    }
+
+    if (!event?.shiftKey) {
+      projectSelectionAnchorRef.current = nodeId;
+      setSelectedProjectIds(new Set([nodeId]));
+      return;
+    }
+
+    const anchorId = projectSelectionAnchorRef.current || selectedProjectId || nodeId;
+    const explorerRoot = event.currentTarget.closest(".navigator.left-panel") || document;
+    const visibleIds = Array.from(explorerRoot.querySelectorAll<HTMLElement>("[data-project-node-id]"))
+      .map((element) => element.dataset.projectNodeId || "")
+      .filter(Boolean);
+    const anchorIndex = visibleIds.indexOf(anchorId);
+    const targetIndex = visibleIds.indexOf(nodeId);
+
+    if (anchorIndex === -1 || targetIndex === -1) {
+      projectSelectionAnchorRef.current = nodeId;
+      setSelectedProjectIds(new Set([nodeId]));
+      return;
+    }
+
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    setSelectedProjectIds(new Set(visibleIds.slice(start, end + 1)));
+  }
+
   function setHistory(updater) {
     setFileHistories((current) => {
       const currentHistory = current[activeFileId] || {
@@ -7419,17 +7897,60 @@ function App() {
     });
   }
 
-  function switchToTab(fileId, paneId = null) {
-    const file = findProjectNode(projectTree, fileId)?.node ||
+  function getEditorFileForId(fileId) {
+    return findProjectNode(projectTree, fileId)?.node ||
       (fileId === specializationsTabId ? specializationsTabFile : null) ||
       (fileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
+      (fileId === designSystemTabId ? designSystemTabFile : null) ||
       (fileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(fileId)) : null);
+  }
+
+  function persistActiveVisualTemplateModelToHistory() {
+    if (!activeIsVisualTemplate || !activeFileId) return;
+
+    const nextModel = normalizeVisualTemplateModel({
+      ...visualTemplateModelRef.current,
+      filePath: getVisualTemplateExistingPath(),
+    });
+    const content = JSON.stringify(getPersistableVisualTemplateModel(nextModel), null, 2);
+    setFileHistories((current) => ({
+      ...current,
+      [activeFileId]: {
+        past: current[activeFileId]?.past || [],
+        present: content,
+        future: current[activeFileId]?.future || [],
+      },
+    }));
+    if (activeFileKind === "visual-template") {
+      setProjectTree((currentTree) => updateProjectNode(currentTree, activeFileId, (node) => ({
+        ...node,
+        content,
+      })));
+    }
+  }
+
+  function loadVisualTemplateModelForFile(fileId, file = getEditorFileForId(fileId)) {
+    if (!file || file.type !== "file" || getProjectFileKind(file) !== "visual-template") return;
+
+    const content = fileHistories[fileId]?.present || file.content || "";
+    const model = parseVisualTemplateModel(content);
+    const typedModel = {
+      ...model,
+      artifactType: getVisualTemplateFileArtifactType(file, content),
+      filePath: file.githubPath || getProjectFilePath(projectTree, fileId) || model.filePath || "",
+    };
+    loadVisualTemplateModel(hydrateNodeBindingTemplateModel(typedModel));
+  }
+
+  function switchToTab(fileId, paneId = null) {
+    const file = getEditorFileForId(fileId);
     if (!file || file.type !== "file") return;
     const pane = tabPanes.find((candidate) => candidate.id === paneId && candidate.tabs.includes(fileId)) ||
       tabPanes.find((candidate) => candidate.tabs.includes(fileId));
 
     sourceEditBaseRef.current = null;
     setContextMenu(null);
+    persistActiveVisualTemplateModelToHistory();
     if (pane) {
       setActivePaneId(pane.id);
       setTabPanes((currentPanes) => currentPanes.map((currentPane) => (
@@ -7439,7 +7960,8 @@ function App() {
       )));
     }
     setActiveFileId(fileId);
-    setSelectedProjectId(fileId === specializationsTabId ? null : fileId);
+    setSelectedProjectId(fileId === specializationsTabId || fileId === designSystemTabId ? null : fileId);
+    loadVisualTemplateModelForFile(fileId, file);
   }
 
   function activatePaneSelection(paneId, fileId, path) {
@@ -7503,7 +8025,7 @@ function App() {
     const startOverlap = editorLeftOverlap;
 
     function handlePointerMove(moveEvent) {
-      setEditorLeftOverlap(Math.max(0, Math.min(180, startOverlap - (moveEvent.clientX - startX))));
+      setEditorLeftOverlap(Math.max(0, Math.min(360, startOverlap + (moveEvent.clientX - startX))));
     }
 
     function handlePointerUp() {
@@ -7537,53 +8059,63 @@ function App() {
     const file = findProjectNode(projectTree, fileId)?.node;
     if (!file && fileId === specializationsTabId) return specializationsTabFile.name;
     if (!file && fileId === visualTemplatesTabId) return visualTemplatesTabFile.name;
+    if (!file && fileId === designSystemTabId) return designSystemTabFile.name;
     if (!file && fileId?.startsWith(`${authoringProfileTabPrefix}-`)) return createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(fileId)).name;
     return file?.type === "file" ? file.name : "file";
   }
 
   function closeTab(fileId, event = null, paneId = null) {
     event?.stopPropagation();
+    if (fileId === activeFileId) {
+      persistActiveVisualTemplateModelToHistory();
+    }
+
+    const sourcePane = tabPanes.find((pane) => pane.id === (paneId || tabPanes.find((candidate) => candidate.tabs.includes(fileId))?.id));
+    if (!sourcePane) {
+      setTabContextMenu(null);
+      return;
+    }
+
+    const tabIndex = sourcePane.tabs.indexOf(fileId);
+    const nextPanes = tabPanes.map((pane) => {
+      if (pane.id !== sourcePane.id) return pane;
+
+      const nextTabs = pane.tabs.filter((id) => id !== fileId);
+      const nextPaneActiveFileId = pane.activeFileId === fileId
+        ? nextTabs[Math.max(0, tabIndex - 1)] || nextTabs[0] || null
+        : pane.activeFileId;
+
+      return { ...pane, tabs: nextTabs, activeFileId: nextPaneActiveFileId };
+    }).filter((pane) => pane.tabs.length > 0 || tabPanes.length === 1);
 
     let nextActiveFileId = activeFileId;
     let nextActivePaneId = activePaneId;
+    const closingActiveTab = fileId === activeFileId || activePaneId === sourcePane.id;
+    if (closingActiveTab) {
+      const preferredPane = nextPanes.find((pane) => pane.id === sourcePane.id && pane.activeFileId) ||
+        nextPanes.find((pane) => pane.id === activePaneId && pane.activeFileId) ||
+        nextPanes.find((pane) => pane.activeFileId || pane.tabs[0]);
+      nextActivePaneId = preferredPane?.id || "pane-left";
+      nextActiveFileId = preferredPane?.activeFileId || preferredPane?.tabs[0] || null;
+    }
 
-    setTabPanes((currentPanes) => {
-      const sourcePane = currentPanes.find((pane) => pane.id === (paneId || currentPanes.find((candidate) => candidate.tabs.includes(fileId))?.id));
-      if (!sourcePane) return currentPanes;
+    setTabPanes(nextPanes);
 
-      const tabIndex = sourcePane.tabs.indexOf(fileId);
-      const nextPanes = currentPanes.map((pane) => {
-        if (pane.id !== sourcePane.id) return pane;
-
-        const nextTabs = pane.tabs.filter((id) => id !== fileId);
-        const nextPaneActiveFileId = pane.activeFileId === fileId
-          ? nextTabs[Math.max(0, tabIndex - 1)] || nextTabs[0] || null
-          : pane.activeFileId;
-
-        if (fileId === activeFileId && nextPaneActiveFileId) {
-          nextActiveFileId = nextPaneActiveFileId;
-          nextActivePaneId = pane.id;
-        }
-
-        return { ...pane, tabs: nextTabs, activeFileId: nextPaneActiveFileId };
-      }).filter((pane) => pane.tabs.length > 0 || currentPanes.length === 1);
-
-      if (fileId === activeFileId && !nextPanes.some((pane) => pane.tabs.includes(nextActiveFileId))) {
-        nextActivePaneId = nextPanes[0]?.id || "pane-left";
-        nextActiveFileId = nextPanes[0]?.activeFileId || nextPanes[0]?.tabs[0] || null;
-      }
-
-      return nextPanes;
-    });
-
-    if (fileId === activeFileId) {
+    if (closingActiveTab) {
       setActivePaneId(nextActivePaneId);
       setActiveFileId(nextActiveFileId);
-      setSelectedProjectId(null);
+      setSelectedProjectId(nextActiveFileId);
+      setSelectedProjectIds(nextActiveFileId ? new Set([nextActiveFileId]) : new Set());
+      projectSelectionAnchorRef.current = nextActiveFileId || null;
+      if (nextActiveFileId) {
+        loadVisualTemplateModelForFile(nextActiveFileId);
+      }
     }
+    setTabContextMenu(null);
   }
 
   function closeOtherTabs(fileId, paneId) {
+    persistActiveVisualTemplateModelToHistory();
     setTabPanes((currentPanes) => currentPanes.map((pane) => (
       pane.id === paneId
         ? { ...pane, tabs: [fileId], activeFileId: fileId }
@@ -7592,17 +8124,21 @@ function App() {
     setActivePaneId(paneId);
     setActiveFileId(fileId);
     setSelectedProjectId(fileId);
+    loadVisualTemplateModelForFile(fileId);
     setTabContextMenu(null);
   }
 
   function closeAllTabs(paneId) {
     const pane = tabPanes.find((candidate) => candidate.id === paneId);
     if (!pane) return;
+    persistActiveVisualTemplateModelToHistory();
 
     if (tabPanes.length === 1) {
       setTabPanes([{ ...pane, tabs: [], activeFileId: null }]);
       setActiveFileId(null);
       setSelectedProjectId(null);
+      setSelectedProjectIds(new Set());
+      projectSelectionAnchorRef.current = null;
       setTabContextMenu(null);
       return;
     }
@@ -7613,24 +8149,51 @@ function App() {
     setActivePaneId(nextPane.id);
     setActiveFileId(nextPane.activeFileId);
     setSelectedProjectId(nextPane.activeFileId);
+    setSelectedProjectIds(nextPane.activeFileId ? new Set([nextPane.activeFileId]) : new Set());
+    projectSelectionAnchorRef.current = nextPane.activeFileId || null;
+    if (nextPane.activeFileId) {
+      loadVisualTemplateModelForFile(nextPane.activeFileId);
+    }
     setTabContextMenu(null);
+  }
+
+  function canSplitTabFromPane(fileId, paneId, panes = tabPanes) {
+    const pane = panes.find((candidate) => candidate.id === paneId);
+    return Boolean(pane?.tabs.includes(fileId) && pane.tabs.length > 1 && panes.length === 1);
+  }
+
+  function getSplitTabPanes(fileId, paneId, targetPaneId, targetLabel, { move = false } = {}) {
+    if (!canSplitTabFromPane(fileId, paneId, tabPanes)) return null;
+
+    return [
+      ...tabPanes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        if (!move) {
+          return pane.tabs.includes(fileId)
+            ? { ...pane, activeFileId: fileId }
+            : pane;
+        }
+
+        const nextTabs = pane.tabs.filter((id) => id !== fileId);
+        return {
+          ...pane,
+          tabs: nextTabs,
+          activeFileId: pane.activeFileId === fileId ? nextTabs[0] || null : pane.activeFileId,
+        };
+      }),
+      { id: targetPaneId, label: targetLabel, tabs: [fileId], activeFileId: fileId },
+    ];
   }
 
   function splitTabRight(fileId, paneId) {
     const rightPaneId = "pane-right";
-
-    setTabPanes((currentPanes) => {
-      if (currentPanes.length > 1) return currentPanes;
-
-      return [
-        ...currentPanes.map((pane) => (
-        pane.id === paneId && pane.tabs.includes(fileId)
-          ? { ...pane, activeFileId: fileId }
-          : pane
-        )),
-        { id: rightPaneId, label: "Right", tabs: [fileId], activeFileId: fileId },
-      ];
-    });
+    const nextPanes = getSplitTabPanes(fileId, paneId, rightPaneId, "Right");
+    if (!nextPanes) {
+      setTabContextMenu(null);
+      return;
+    }
+    setTabPanes(nextPanes);
     setPaneSplitDirection("right");
     setActivePaneId(rightPaneId);
     setActiveFileId(fileId);
@@ -7640,19 +8203,12 @@ function App() {
 
   function splitTabDown(fileId, paneId) {
     const bottomPaneId = "pane-bottom";
-
-    setTabPanes((currentPanes) => {
-      if (currentPanes.length > 1) return currentPanes;
-
-      return [
-        ...currentPanes.map((pane) => (
-          pane.id === paneId && pane.tabs.includes(fileId)
-            ? { ...pane, activeFileId: fileId }
-            : pane
-        )),
-        { id: bottomPaneId, label: "Bottom", tabs: [fileId], activeFileId: fileId },
-      ];
-    });
+    const nextPanes = getSplitTabPanes(fileId, paneId, bottomPaneId, "Bottom");
+    if (!nextPanes) {
+      setTabContextMenu(null);
+      return;
+    }
+    setTabPanes(nextPanes);
     setPaneSplitDirection("down");
     setPaneSplitPercent(45);
     setActivePaneId(bottomPaneId);
@@ -7663,27 +8219,12 @@ function App() {
 
   function splitAndMoveTabRight(fileId, paneId) {
     const rightPaneId = "pane-right";
-
-    setTabPanes((currentPanes) => {
-      if (currentPanes.length > 1) return currentPanes;
-
-      const sourcePane = currentPanes.find((pane) => pane.id === paneId);
-      if (!sourcePane || sourcePane.tabs.length <= 1) return currentPanes;
-
-      return [
-        ...currentPanes.map((pane) => {
-          if (pane.id !== paneId) return pane;
-
-          const nextTabs = pane.tabs.filter((id) => id !== fileId);
-          return {
-            ...pane,
-            tabs: nextTabs,
-            activeFileId: pane.activeFileId === fileId ? nextTabs[0] || null : pane.activeFileId,
-          };
-        }),
-        { id: rightPaneId, label: "Right", tabs: [fileId], activeFileId: fileId },
-      ];
-    });
+    const nextPanes = getSplitTabPanes(fileId, paneId, rightPaneId, "Right", { move: true });
+    if (!nextPanes) {
+      setTabContextMenu(null);
+      return;
+    }
+    setTabPanes(nextPanes);
     setPaneSplitDirection("right");
     setActivePaneId(rightPaneId);
     setActiveFileId(fileId);
@@ -7693,28 +8234,14 @@ function App() {
 
   function splitAndMoveTabDown(fileId, paneId) {
     const bottomPaneId = "pane-bottom";
-
-    setTabPanes((currentPanes) => {
-      if (currentPanes.length > 1) return currentPanes;
-
-      const sourcePane = currentPanes.find((pane) => pane.id === paneId);
-      if (!sourcePane || sourcePane.tabs.length <= 1) return currentPanes;
-
-      return [
-        ...currentPanes.map((pane) => {
-          if (pane.id !== paneId) return pane;
-
-          const nextTabs = pane.tabs.filter((id) => id !== fileId);
-          return {
-            ...pane,
-            tabs: nextTabs,
-            activeFileId: pane.activeFileId === fileId ? nextTabs[0] || null : pane.activeFileId,
-          };
-        }),
-        { id: bottomPaneId, label: "Bottom", tabs: [fileId], activeFileId: fileId },
-      ];
-    });
+    const nextPanes = getSplitTabPanes(fileId, paneId, bottomPaneId, "Bottom", { move: true });
+    if (!nextPanes) {
+      setTabContextMenu(null);
+      return;
+    }
+    setTabPanes(nextPanes);
     setPaneSplitDirection("down");
+    setPaneSplitPercent(45);
     setActivePaneId(bottomPaneId);
     setActiveFileId(fileId);
     setSelectedProjectId(fileId);
@@ -7833,6 +8360,14 @@ function App() {
     setSelectedProjectId(nextActiveFileId);
     setTabDropTarget(null);
     setTabContextMenu(null);
+  }
+
+  function closeTransientContextMenus() {
+    setContextMenu(null);
+    setTabContextMenu(null);
+    setProjectContextMenu(null);
+    setVisualTemplateLayerContextMenu(null);
+    setGitCommitContextMenu(null);
   }
 
   function getDraggedTab(event) {
@@ -7985,7 +8520,7 @@ function App() {
           context: aiContext,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Chat request failed.");
@@ -8206,7 +8741,7 @@ function App() {
           purpose: "generate-shortdesc",
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not generate shortdesc.");
@@ -8386,7 +8921,7 @@ function App() {
           context: leanContext,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not rewrite selected text.");
@@ -8452,6 +8987,142 @@ function App() {
     }));
   }, [activeFileId, activeIsTextEditable, xml]);
 
+  async function saveActiveTextDraft({ openTerminal = false } = {}) {
+    if (!activeFile || !activeIsTextEditable) return false;
+
+    finalizeSourceDraft();
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+
+    if (!activeFile.githubPath) {
+      const message = `${activeFile.name} has no workspace path to save yet.`;
+      setDraftSaveState({ status: "error", message });
+      appendTerminalMessage(message, {
+        source: "Drafts",
+        level: "warning",
+        open: openTerminal,
+      });
+      return false;
+    }
+
+    if (!isAuthenticated) {
+      const message = "Sign in before saving drafts to the workspace.";
+      setDraftSaveState({ status: "error", message });
+      appendTerminalMessage(message, {
+        source: "Drafts",
+        level: "warning",
+        open: openTerminal,
+      });
+      return false;
+    }
+
+    try {
+      setDraftSaveState({
+        status: "saving",
+        message: `Saving draft for ${activeFile.name}...`,
+      });
+      const draftContent = activeFileKind === "xml" ? ensureDitaDoctype(xml) : xml;
+      const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+        method: "PUT",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath: activeFile.githubPath,
+          githubSha: activeFile.githubSha || "",
+          sourceContentHash: activeFile.sourceContentHash || "",
+          contentFormat: activeFileKind,
+          content: draftContent,
+        }),
+      });
+      const body = await readBackendJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not save draft.");
+      }
+
+      lastSavedDraftRef.current = `${activeFile.githubPath}\n${activeFile.githubSha || ""}\n${xml}`;
+      setProjectTree((currentTree) => updateProjectNode(currentTree, activeFile.id, (node) => ({
+        ...node,
+        draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+        draftDirty: Boolean(body.draft?.dirty),
+        draftContentHash: body.draft?.draft_content_hash || node.draftContentHash || "",
+        sourceContentHash: body.draft?.source_content_hash || node.sourceContentHash || "",
+      })));
+      setDraftSaveState({
+        status: "saved",
+        message: `Draft saved at ${new Date(body.draft?.saved_at || Date.now()).toLocaleTimeString()}.`,
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save draft.";
+      setDraftSaveState({
+        status: "error",
+        message,
+      });
+      appendTerminalMessage(message, {
+        source: "Drafts",
+        level: "error",
+        open: openTerminal,
+      });
+      return false;
+    }
+  }
+
+  async function saveActiveEditorDocumentFromShortcut() {
+    if (activeIsVisualTemplate) {
+      await saveVisualTemplateDraft();
+      return;
+    }
+    if (activeFileKind === "design-system") {
+      await saveDesignSystemDraft();
+      return;
+    }
+    if (activeFileKind === "specializations") {
+      await saveCurrentSpecialization();
+      return;
+    }
+    if (activeIsTextEditable) {
+      await saveActiveTextDraft({ openTerminal: false });
+    }
+  }
+
+  useEffect(() => {
+    function handleSaveShortcut(event: KeyboardEvent) {
+      if (
+        event.key.toLowerCase() !== "s" ||
+        (!event.metaKey && !event.ctrlKey) ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void saveActiveEditorDocumentFromShortcut();
+    }
+
+    document.addEventListener("keydown", handleSaveShortcut, true);
+    return () => document.removeEventListener("keydown", handleSaveShortcut, true);
+  }, [
+    activeFileId,
+    activeFileKind,
+    activeFile?.githubPath,
+    activeFile?.githubSha,
+    activeFile?.sourceContentHash,
+    activeIsTextEditable,
+    activeIsVisualTemplate,
+    designSystemDraft,
+    isAuthenticated,
+    specializationForm,
+    selectedSpecializationId,
+    visualTemplateModel,
+    xml,
+  ]);
+
   useEffect(() => {
     if (draftSaveTimerRef.current) {
       clearTimeout(draftSaveTimerRef.current);
@@ -8493,7 +9164,7 @@ function App() {
             content: draftContent,
           }),
         });
-        const body = await response.json();
+        const body = await readBackendJson(response);
 
         if (!response.ok) {
           throw new Error(body.error || "Could not save draft.");
@@ -8554,7 +9225,7 @@ function App() {
       const draftResponse = await fetch(`${backendBaseUrl}/api/drafts/github?path=${encodeURIComponent(file.githubPath)}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const draftBody = await draftResponse.json();
+      const draftBody = await readBackendJson(draftResponse);
       const savedDraft = draftResponse.ok &&
         draftBody.draft?.dirty &&
         !draftBody.draft?.deleted_at &&
@@ -8564,7 +9235,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/file?path=${encodeURIComponent(file.githubPath)}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok && !savedDraft) {
         throw new Error(body.error || `Could not load ${file.name} from GitHub.`);
@@ -8573,6 +9244,9 @@ function App() {
       const extension = getFileExtension(file.name);
       const isImage = /^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension);
       const fileKind = getProjectFileKind(file);
+      const savedDraftDataUrl = isImage && /^data:image\//i.test(String(savedDraft?.content_text || ""))
+        ? String(savedDraft.content_text)
+        : "";
       let rawContent = isImage ? "" : savedDraft?.content_text || body.content || "";
       const detectedDitaType = fileKind === "xml"
         ? inferDitaTypeFromXml(rawContent) || inferBestProjectFileType(file.name, file.ditaType)
@@ -8592,8 +9266,10 @@ function App() {
         ...file,
         ditaType: detectedDitaType || file.ditaType,
         content: normalizedContent,
-        previewHref: isImage && response.ok && body.contentBase64
-          ? `data:${body.mimeType || "application/octet-stream"};base64,${body.contentBase64}`
+        previewHref: isImage
+          ? savedDraftDataUrl || (response.ok && body.contentBase64
+            ? `data:${body.mimeType || "application/octet-stream"};base64,${body.contentBase64}`
+            : file.previewHref)
           : file.previewHref,
         githubSha: response.ok ? body.sha || file.githubSha || "" : savedDraft?.github_sha || file.githubSha || "",
         sourceContentHash: savedDraft?.source_content_hash || (response.ok ? body.contentHash : "") || file.sourceContentHash || "",
@@ -8632,7 +9308,7 @@ function App() {
     }
   }
 
-  async function openProjectFile(fileId) {
+  async function openProjectFile(fileId, preferredPaneId = activePaneId) {
     const projectFile = findProjectNode(projectTree, fileId)?.node;
     const file = await loadGitHubFileIfNeeded(projectFile);
     if (!file || file.type !== "file") {
@@ -8641,7 +9317,7 @@ function App() {
 
     const fileKind = getProjectFileKind(file);
     const existingPane = tabPanes.find((pane) => pane.tabs.includes(file.id));
-    const targetPaneId = existingPane?.id || activePaneId;
+    const targetPaneId = existingPane?.id || preferredPaneId || activePaneId;
 
     setTabPanes((currentPanes) => currentPanes.map((pane) => (
       pane.id === targetPaneId
@@ -8672,12 +9348,14 @@ function App() {
     setSelectedProjectId(file.id);
 
     if (fileKind === "visual-template") {
-      const model = parseVisualTemplateModel(file.content || "");
-      loadVisualTemplateModel({
+      const content = fileHistories[file.id]?.present || file.content || "";
+      const model = parseVisualTemplateModel(content);
+      const typedModel = {
         ...model,
-        artifactType: file.ditaType === "visual-template-binding" ? "binding" : model.artifactType,
+        artifactType: getVisualTemplateFileArtifactType(file, content),
         filePath: file.githubPath || getProjectFilePath(projectTree, file.id) || model.filePath || "",
-      });
+      };
+      loadVisualTemplateModel(hydrateNodeBindingTemplateModel(typedModel));
       setExplorerSystemMessage(`Opened visual template ${file.name}`, "info", { open: false });
       return;
     }
@@ -8822,7 +9500,7 @@ function App() {
           specializations: activeSpecializationDefinitions,
         }),
       });
-      const result = await response.json();
+      const result = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(result.error || "Validation request failed.");
@@ -8992,7 +9670,13 @@ function App() {
     const folder = selectedContainer;
     if (!folder || folder.type !== "folder") return;
 
-    const name = makeUniqueName(newItemName.trim() || "new-folder", folder.children);
+    const name = makeUniqueName(sanitizeProjectItemName(newItemName, { fallback: "new-folder" }), folder.children);
+    const targetPath = normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${name}`);
+    const pathMessage = getProjectPathGuardMessage(targetPath);
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      return;
+    }
     const folderNode = {
       id: `folder-${Date.now().toString(36)}`,
       type: "folder",
@@ -9013,6 +9697,12 @@ function App() {
     if (!folder || folder.type !== "folder") return;
 
     const fileName = makeUniqueName(normalizeFileName(newItemName, newItemType), folder.children);
+    const targetPath = normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${fileName}`);
+    const pathMessage = getProjectPathGuardMessage(targetPath);
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      return;
+    }
     const isImageFile = newItemType === "image";
     const fileNode = {
       id: `file-${Date.now().toString(36)}`,
@@ -9063,6 +9753,12 @@ function App() {
     const fileName = makeUniqueName(normalizeFileName(getDefaultFileStem(typeKey), typeKey), folder.children);
     const fileType = typeKey;
     const githubPath = getGitHubChildPath(folder, fileName);
+    const pathMessage = getProjectPathGuardMessage(githubPath || normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${fileName}`));
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      setFileTypePicker(null);
+      return;
+    }
     if (fileType === "visual-template") {
       setVisualTemplateCreationTarget({
         folderId: folder.id,
@@ -9127,7 +9823,7 @@ function App() {
               content: fileNode.content || "",
             }),
           });
-          const body = await response.json();
+          const body = await readBackendJson(response);
 
           if (!response.ok) {
             throw new Error(body.error || "Could not save new file draft.");
@@ -9156,6 +9852,14 @@ function App() {
 
     const folder = findProjectNode(projectTree, target.folderId)?.node;
     if (!folder || folder.type !== "folder") return;
+
+    const pathMessage = getProjectPathGuardMessage(target.filePath || normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${target.fileName}`));
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      setVisualTemplateCreationTarget(null);
+      setFileTypePicker(null);
+      return;
+    }
 
     const templateName = target.fileName.replace(/\.[^./]+$/i, "").replace(/[-_]+/g, " ");
     const templateId = `template-${slugifyWorkspaceArtifactName(templateName) || Date.now().toString(36)}`;
@@ -9228,7 +9932,7 @@ function App() {
               content,
             }),
           });
-          const body = await response.json();
+          const body = await readBackendJson(response);
 
           if (!response.ok) {
             throw new Error(body.error || "Could not save visual template draft.");
@@ -9251,12 +9955,17 @@ function App() {
     }
   }
 
-  function createExplorerFolder(folderId = getExplorerTargetFolderId()) {
+  function createExplorerFolderNode(folderId = getExplorerTargetFolderId(), options: { select?: boolean; edit?: boolean } = {}) {
     const folder = findProjectNode(projectTree, folderId)?.node;
-    if (!folder || folder.type !== "folder") return;
+    if (!folder || folder.type !== "folder") return null;
 
-    const name = makeUniqueName("New Folder", folder.children);
+    const name = makeUniqueName(sanitizeProjectItemName("New Folder", { fallback: "New Folder" }), folder.children).trim() || "New Folder";
     const githubPath = getGitHubChildPath(folder, name);
+    const pathMessage = getProjectPathGuardMessage(githubPath || normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${name}`));
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      return null;
+    }
     const folderNode = {
       id: `folder-${Date.now().toString(36)}`,
       type: "folder",
@@ -9264,15 +9973,62 @@ function App() {
       children: [],
       githubPath: githubPath || undefined,
       githubLoaded: Boolean(githubPath),
+      checkedInAt: "Draft",
+      pendingFolderPersist: Boolean(githubPath),
     };
 
     setProjectTree((tree) => updateProjectNode(tree, folder.id, (node) => ({
       ...node,
       children: [...node.children, folderNode],
     })));
-    setSelectedProjectId(folderNode.id);
-    setEditingProjectNodeId(folderNode.id);
+    if (options.select !== false) {
+      setSelectedProjectId(folderNode.id);
+    }
+    if (options.edit !== false) {
+      setEditingProjectNodeId(folderNode.id);
+    }
     setExplorerSystemMessage(`Created folder ${name}`);
+
+    if (folderNode.githubPath) {
+      void persistExplorerFolderPath(folderNode.id, folderNode.githubPath, { clearPending: false });
+    }
+
+    return folderNode;
+  }
+
+  function createExplorerFolder(folderId = getExplorerTargetFolderId()) {
+    createExplorerFolderNode(folderId);
+  }
+
+  async function persistExplorerFolderPath(nodeId, folderPath: string, options: { clearPending?: boolean } = {}) {
+    if (!isAuthenticated || !folderPath) return;
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/projects/folder`, {
+        method: "POST",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ path: folderPath }),
+      });
+      const body = await readBackendJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not save folder.");
+      }
+
+      setProjectTree((currentTree) => updateProjectNode(currentTree, nodeId, (node) => ({
+        ...node,
+        pendingFolderPersist: options.clearPending === false ? node.pendingFolderPersist : false,
+        githubLoaded: true,
+      })));
+    } catch (error) {
+      setDraftSaveState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not save folder.",
+      });
+    }
   }
 
   function createAiReviewSampleFile() {
@@ -9351,12 +10107,18 @@ function App() {
       ? isDitaDocumentType(selectedProjectNode.ditaType)
         ? normalizeFileName(newItemName, selectedProjectNode.ditaType || newItemType)
         : normalizeAssetFileName(newItemName, selectedProjectNode.name)
-      : (newItemName.trim() || selectedProjectNode.name);
+      : sanitizeProjectItemName(newItemName, { fallback: selectedProjectNode.name });
     const name = makeUniqueName(normalized, parent.children, selectedProjectNode.id);
     const newPath = normalizeProjectPath(`${parentPath}/${name}`);
+    const pathMessage = getProjectPathGuardMessage(newPath);
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      return;
+    }
+    const newGitHubPath = getGitHubChildPath(parent, name);
 
     const renamedTree = updateProjectNode(projectTree, selectedProjectNode.id, (node) => ({
-      ...node,
+      ...(newGitHubPath ? rebaseGitHubPath(node, newGitHubPath) : node),
       name,
     }));
     const { tree: nextTree, rewrittenCount } = rewriteProjectReferencesForMovedPath(renamedTree, oldPath, newPath);
@@ -9386,6 +10148,14 @@ function App() {
         ? `Renamed to ${name} and updated ${rewrittenCount} href${rewrittenCount === 1 ? "" : "s"}.`
         : `Renamed to ${name}`,
     );
+
+    if (oldPath && newPath && oldPath !== newPath && newGitHubPath) {
+      void moveProjectPathInDatabase(oldPath, newPath, name).catch((error) => {
+        const message = error instanceof Error ? error.message : `Renamed ${name} locally, but the new name was not saved.`;
+        setExplorerSystemMessage(message, "error");
+        appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+      });
+    }
   }
 
   function renameProjectItemById(nodeId) {
@@ -9414,9 +10184,15 @@ function App() {
       ? isDitaDocumentType(match.node.ditaType)
         ? normalizeFileName(enteredName, match.node.ditaType || inferProjectFileType(match.node.name))
         : normalizeAssetFileName(enteredName, match.node.name)
-      : enteredName.trim();
+      : sanitizeProjectItemName(enteredName, { fallback: match.node.name });
     const name = makeUniqueName(normalized, match.parent.children, match.node.id);
     const newPath = normalizeProjectPath(`${parentPath}/${name}`);
+    const pathMessage = getProjectPathGuardMessage(newPath);
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      setEditingProjectNodeId(null);
+      return;
+    }
     const newGitHubPath = getGitHubChildPath(match.parent, name);
     const renamedTree = updateProjectNode(projectTree, match.node.id, (node) => ({
       ...(newGitHubPath ? rebaseGitHubPath(node, newGitHubPath) : node),
@@ -9450,36 +10226,115 @@ function App() {
         : `Renamed to ${name}`,
     );
     setEditingProjectNodeId(null);
+
+    if (oldPath && newPath && oldPath !== newPath && newGitHubPath) {
+      void moveProjectPathInDatabase(oldPath, newPath, name).catch((error) => {
+        const message = error instanceof Error ? error.message : `Renamed ${name} locally, but the new name was not saved.`;
+        setExplorerSystemMessage(message, "error");
+        appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+      });
+    }
   }
 
   function copySelectedProjectItem() {
     if (!selectedProjectNode || selectedProjectNode.id === "root") return;
-
-    const parent = selectedProject.parent;
-    const clone = cloneProjectNode(selectedProjectNode);
-    clone.name = makeUniqueName(`Copy of ${selectedProjectNode.name}`, parent.children);
-
-    setProjectTree((tree) => updateProjectNode(tree, parent.id, (node) => ({
-      ...node,
-      children: [...node.children, clone],
-    })));
-    setSelectedProjectId(clone.id);
-    setExplorerSystemMessage(`Copied ${selectedProjectNode.name}`);
+    copyProjectItemById(selectedProjectNode.id);
   }
 
   function copyProjectItemById(nodeId) {
     const match = findProjectNode(projectTree, nodeId);
-    if (!match || match.node.id === "root" || !match.parent) return;
+    if (!match || match.node.id === "root") return;
 
-    const clone = cloneProjectNode(match.node);
-    clone.name = makeUniqueName(`Copy of ${match.node.name}`, match.parent.children);
+    setProjectClipboardNodeId(nodeId);
+    setProjectClipboardMode("copy");
+    setExplorerSystemMessage(`Copied ${match.node.name}. Right-click a folder or file location to paste.`);
+  }
 
-    setProjectTree((tree) => updateProjectNode(tree, match.parent.id, (node) => ({
+  function cutProjectItemById(nodeId) {
+    const match = findProjectNode(projectTree, nodeId);
+    if (!match || match.node.id === "root") return;
+
+    setProjectClipboardNodeId(nodeId);
+    setProjectClipboardMode("cut");
+    setExplorerSystemMessage(`Cut ${match.node.name}. Right-click a valid destination to move it.`);
+  }
+
+  function getProjectPasteDestination(targetNodeId) {
+    return getProjectPasteDestinationForTarget(projectTree, projectClipboardNodeId, targetNodeId, projectClipboardMode);
+  }
+
+  async function loadProjectNodeForCopy(node) {
+    if (node.type === "file") {
+      if (node.githubPath && !node.githubLoaded) {
+        return loadGitHubFileIfNeeded(node);
+      }
+      return node;
+    }
+
+    const children = await Promise.all(node.children.map((child) => loadProjectNodeForCopy(child)));
+    return {
       ...node,
-      children: [...node.children, clone],
-    })));
-    setSelectedProjectId(clone.id);
-    setExplorerSystemMessage(`Copied ${match.node.name}`);
+      children,
+    };
+  }
+
+  async function persistCopiedProjectNode(node) {
+    if (!isAuthenticated || !node?.githubPath) return;
+
+    if (node.type === "file") {
+      await saveImportedProjectFileDraft(node);
+      return;
+    }
+
+    await persistExplorerFolderPath(node.id, node.githubPath);
+    await Promise.all(node.children.map((child) => persistCopiedProjectNode(child)));
+  }
+
+  async function pasteProjectItemInto(targetNodeId) {
+    const destination = getProjectPasteDestination(targetNodeId);
+    const sourceMatch = projectClipboardNodeId ? findProjectNode(projectTree, projectClipboardNodeId) : null;
+    if (!destination || !sourceMatch) {
+      setExplorerSystemMessage("Choose a folder or file location before pasting.", "warning");
+      return;
+    }
+
+    if (projectClipboardMode === "cut") {
+      moveProjectItem(sourceMatch.node.id, destination.id, "inside");
+      setProjectClipboardNodeId(null);
+      setProjectClipboardMode("copy");
+      return;
+    }
+
+    try {
+      const sourceNode = await loadProjectNodeForCopy(sourceMatch.node);
+      const cloneBase = cloneProjectNode(sourceNode);
+      const cloneName = makeUniqueName(sourceNode.name, destination.children);
+      const clonePath = getGitHubChildPath(destination, cloneName);
+      const clone = {
+        ...(clonePath ? rebaseGitHubPath(cloneBase, clonePath) : cloneBase),
+        name: cloneName,
+        checkedInAt: "Draft",
+      };
+
+      setProjectTree((tree) => updateProjectNode(tree, destination.id, (node) => ({
+        ...node,
+        children: [...node.children, clone],
+      })));
+      setSelectedProjectId(clone.id);
+      setExplorerSystemMessage(`Pasted ${clone.name} into ${destination.name}.`);
+
+      if (clone.githubPath) {
+        void persistCopiedProjectNode(clone).catch((error) => {
+          const message = error instanceof Error ? error.message : `Pasted ${clone.name} locally, but could not save it.`;
+          setExplorerSystemMessage(message, "error");
+          appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not paste the copied item.";
+      setExplorerSystemMessage(message, "error");
+      appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+    }
   }
 
   async function deleteProjectPathFromDatabase(projectPath: string, label: string) {
@@ -9491,7 +10346,7 @@ function App() {
       },
       body: JSON.stringify({ path: projectPath }),
     });
-    const body = await response.json().catch(() => ({}));
+    const body = await readBackendJson(response).catch(() => ({}));
 
     if (!response.ok) {
       throw new Error(body.error || `Could not delete ${label} from Postgres.`);
@@ -9505,8 +10360,150 @@ function App() {
     return body;
   }
 
+  async function moveProjectPathInDatabase(oldPath: string, newPath: string, label: string) {
+    const response = await fetch(`${backendBaseUrl}/api/projects/path`, {
+      method: "PATCH",
+      headers: {
+        ...(await getBackendAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ oldPath, newPath }),
+    });
+    const body = await readBackendJson(response).catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(body.error || `Could not save the new location for ${label}.`);
+    }
+
+    appendTerminalMessage(
+      `Moved ${label} in Postgres (${body.movedProjectFiles || 0} metadata rows, ${body.movedDrafts || 0} drafts).`,
+      { source: "EXPLORER", level: "info" },
+    );
+
+    return body;
+  }
+
+  async function deleteProjectItemsByIds(nodeIds: Iterable<string>) {
+    const matches = getPrunedProjectSelection(projectTree, nodeIds);
+    if (matches.length === 0) return;
+
+    const selectedPaths = matches.map((match) => getProjectFilePath(projectTree, match.node.id));
+    const preferredSelectionId = matches.find((match) => match.parent && match.parent.id !== "root")?.parent?.id ||
+      matches[0]?.parent?.id ||
+      "root";
+
+    for (const match of matches) {
+      const selectedProjectPath = getProjectFilePath(projectTree, match.node.id);
+      const blockingReferences = findReferencesTargetingProjectPath(projectTree, selectedProjectPath).filter((reference) => (
+        !selectedPaths.some((targetPath) => isProjectPathInside(reference.sourcePath, targetPath))
+      ));
+
+      if (blockingReferences.length > 0) {
+        setExplorerSystemMessage(
+          `Cannot delete ${match.node.name}; it is referenced by ${getReferenceSourceSummary(blockingReferences)}.`,
+          "warning",
+        );
+        return;
+      }
+    }
+
+    const deleteResults = new Map<string, any>();
+
+    for (const match of matches) {
+      const selectedProjectPath = getProjectFilePath(projectTree, match.node.id);
+      try {
+        deleteResults.set(match.node.id, await deleteProjectPathFromDatabase(selectedProjectPath, match.node.name));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Could not delete ${match.node.name}.`;
+        setExplorerSystemMessage(message, "warning");
+        appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+        return;
+      }
+    }
+
+    let nextTree = projectTree;
+    const deletedFileIds = new Set<string>();
+    const markedGitFileIds = new Set<string>();
+    let removedCount = 0;
+    let markedCount = 0;
+
+    for (const match of matches) {
+      collectProjectFileIds(match.node, deletedFileIds);
+
+      if (projectNodeHasGitBackedFile(match.node)) {
+        markedCount += 1;
+        collectGitBackedProjectFileIds(match.node, markedGitFileIds);
+        const deleteResult = deleteResults.get(match.node.id);
+        const deletedAt = deleteResult?.deletedAt || new Date().toISOString();
+        nextTree = updateProjectNode(nextTree, match.node.id, (node) => markProjectNodeSubtreeDeleted(node, deletedAt));
+      } else {
+        removedCount += 1;
+        nextTree = removeProjectNode(nextTree, match.node.id);
+      }
+    }
+
+    const nextPanes = tabPanes.map((pane) => {
+      const nextTabs = pane.tabs.filter((fileId) => !deletedFileIds.has(fileId));
+      return {
+        ...pane,
+        tabs: nextTabs,
+        activeFileId: deletedFileIds.has(pane.activeFileId) ? nextTabs[0] || null : pane.activeFileId,
+      };
+    }).filter((pane) => pane.tabs.length > 0);
+    const safePanes = nextPanes.length
+      ? nextPanes
+      : [{ id: "pane-left", label: "Left", tabs: [], activeFileId: null }];
+    const fallbackPane = safePanes.find((pane) => pane.id === activePaneId) || safePanes[0];
+    const fallbackActiveFileId = fallbackPane?.activeFileId || null;
+    const nextSelectionId = findProjectNode(nextTree, preferredSelectionId)
+      ? preferredSelectionId
+      : "root";
+
+    setProjectTree(nextTree);
+    setTabPanes(safePanes);
+    setFileHistories((current) => {
+      const nextHistories = { ...current };
+      deletedFileIds.forEach((id) => delete nextHistories[id]);
+
+      return nextHistories;
+    });
+    setSelectedPathsByFile((current) => {
+      const nextPaths = { ...current };
+      deletedFileIds.forEach((id) => delete nextPaths[id]);
+
+      return nextPaths;
+    });
+    setSelectedProjectId(nextSelectionId);
+    setSelectedProjectIds(new Set([nextSelectionId]));
+    projectSelectionAnchorRef.current = nextSelectionId;
+
+    if (markedGitFileIds.size > 0) {
+      setSelectedGitCommitFileIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        markedGitFileIds.forEach((id) => nextIds.add(id));
+        return nextIds;
+      });
+    }
+
+    if (deletedFileIds.has(activeFileId)) {
+      setActivePaneId(fallbackPane?.id || "pane-left");
+      setActiveFileId(fallbackActiveFileId);
+    }
+
+    const itemLabel = matches.length === 1 ? matches[0].node.name : `${matches.length} items`;
+    if (markedCount > 0 && removedCount === 0) {
+      setExplorerSystemMessage(`Marked ${itemLabel} for deletion`);
+    } else if (markedCount > 0) {
+      setExplorerSystemMessage(`Deleted or marked ${itemLabel} for deletion`);
+    } else {
+      setExplorerSystemMessage(`Deleted ${itemLabel}`);
+    }
+  }
+
   async function deleteSelectedProjectItem() {
     if (!selectedProjectNode || selectedProjectNode.id === "root") return;
+    await deleteProjectItemsByIds(selectedProjectIds.size > 0 ? selectedProjectIds : [selectedProjectNode.id]);
+    return;
 
     const selectedProjectPath = getProjectFilePath(projectTree, selectedProjectNode.id);
     const blockingReferences = findReferencesTargetingProjectPath(projectTree, selectedProjectPath).filter((reference) => {
@@ -9638,6 +10635,11 @@ function App() {
   async function deleteProjectItemById(nodeId) {
     const match = findProjectNode(projectTree, nodeId);
     if (!match || match.node.id === "root") return;
+    const idsToDelete = selectedProjectIds.has(nodeId) && selectedProjectIds.size > 1
+      ? selectedProjectIds
+      : new Set([nodeId]);
+    await deleteProjectItemsByIds(idsToDelete);
+    return;
 
     const selectedProjectPath = getProjectFilePath(projectTree, match.node.id);
     const blockingReferences = findReferencesTargetingProjectPath(projectTree, selectedProjectPath).filter((reference) => {
@@ -9768,7 +10770,17 @@ function App() {
 
   function moveProjectItem(sourceId, targetId, placement = "inside") {
     const result = moveProjectNodeInTree(projectTree, sourceId, targetId, placement);
-    if (!result.moved) return;
+    if (!result.moved) {
+      if (result.reason) {
+        setExplorerSystemMessage(result.reason, "warning");
+      }
+      return;
+    }
+    const pathMessage = getProjectPathGuardMessage(result.newPath);
+    if (pathMessage) {
+      setExplorerSystemMessage(pathMessage, "warning");
+      return;
+    }
 
     const { tree: nextTree, rewrittenCount } = result.oldPath && result.newPath
       ? rewriteProjectReferencesForMovedPath(result.tree, result.oldPath, result.newPath)
@@ -9800,6 +10812,17 @@ function App() {
     setExplorerSystemMessage(
       `${movedNode?.name || "Item"} moved${rewrittenCount ? ` and updated ${rewrittenCount} href${rewrittenCount === 1 ? "" : "s"}` : ""}.`,
     );
+
+    if (result.oldPath && result.newPath) {
+      void moveProjectPathInDatabase(result.oldPath, result.newPath, movedNode?.name || "item").catch((error) => {
+        const message = error instanceof Error ? error.message : "The item moved locally, but the new location was not saved.";
+        setExplorerSystemMessage(
+          message,
+          "error",
+        );
+        appendTerminalMessage(message, { source: "EXPLORER", level: "error", open: true });
+      });
+    }
   }
 
   function checkInActiveFile() {
@@ -10892,7 +11915,7 @@ function App() {
           language: issue.language,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not add word to dictionary.");
@@ -10931,62 +11954,201 @@ function App() {
     updateXmlFromDoc(doc);
   }
 
-  function loadFile(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    const folder = selectedContainer?.type === "folder" ? selectedContainer : projectTree;
-    const extension = getFileExtension(file.name);
-    const detectedType = /^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)
-      ? "image"
-      : ["dita", "ditamap", "xml"].includes(extension)
-        ? "topic"
-        : ["html", "htm"].includes(extension)
-          ? "html"
-          : "text";
+  function getExplorerImportFolderId(targetNodeId = selectedProjectId, placement = "inside") {
+    const match = findProjectNode(projectTree, targetNodeId);
+    if (!match) return getExplorerTargetFolderId();
+    if (match.node.type === "folder" && placement === "inside") return match.node.id;
+    return match.parent?.id || "root";
+  }
 
-    reader.onload = () => {
-      const fileName = makeUniqueName(file.name, folder.children);
-      const importedFile = {
-        id: `file-${Date.now().toString(36)}`,
-        type: "file",
-        name: fileName,
-        ditaType: detectedType,
-        content: detectedType === "image" ? "" : String(reader.result),
-        previewHref: detectedType === "image" ? String(reader.result) : undefined,
-        checkedInAt: "Imported",
-      };
+  function readLocalImportFile(file: File, detectedType: string) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+
+      if (detectedType === "image" || detectedType === "asset") {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file);
+      }
+    });
+  }
+
+  async function saveImportedProjectFileDraft(file) {
+    if (!isAuthenticated || !file?.githubPath) return;
+
+    const fileKind = getProjectFileKind(file);
+    const content = fileKind === "image" || fileKind === "asset"
+      ? file.previewHref || file.content || ""
+      : file.content || "";
+
+    const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+      method: "PUT",
+      headers: {
+        ...(await getBackendAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filePath: file.githubPath,
+        githubSha: file.githubSha || "",
+        sourceContentHash: "",
+        contentFormat: fileKind,
+        content,
+      }),
+    });
+    const body = await readBackendJson(response);
+
+    if (!response.ok) {
+      throw new Error(body.error || `Could not save imported file ${file.name}.`);
+    }
+
+    setProjectTree((currentTree) => updateProjectNode(currentTree, file.id, (node) => ({
+      ...node,
+      checkedInAt: "Draft",
+      draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+      draftDirty: Boolean(body.draft?.dirty),
+      draftContentHash: body.draft?.draft_content_hash || node.draftContentHash || "",
+      sourceContentHash: body.draft?.source_content_hash || node.sourceContentHash || "",
+      githubLoaded: true,
+    })));
+  }
+
+  async function importLocalFilesIntoExplorer(files, targetNodeId = selectedProjectId, placement = "inside") {
+    const fileList = Array.from(files || []) as File[];
+    if (!fileList.length) return;
+
+    const rejected = fileList
+      .map((file) => getLocalAssetImportRejection(file))
+      .filter(Boolean);
+    const acceptedFiles = fileList.filter((file) => !getLocalAssetImportRejection(file));
+
+    if (rejected.length) {
+      setExplorerSystemMessage(rejected.slice(0, 3).join(" "), "warning");
+    }
+    if (!acceptedFiles.length) return;
+
+    const folderId = getExplorerImportFolderId(targetNodeId, placement);
+    const folder = findProjectNode(projectTree, folderId)?.node;
+    if (!folder || folder.type !== "folder") return;
+
+    try {
+      const importedPayloads = await Promise.all(acceptedFiles.map(async (file, index) => {
+        const detectedType = getImportedLocalFileType(file);
+        const result = await readLocalImportFile(file, detectedType);
+        return { file, detectedType, result, index };
+      }));
+
+      const siblingNames = [...folder.children];
+      const pathRejectedImports: string[] = [];
+      const importedFiles = importedPayloads.map(({ file, detectedType, result, index }) => {
+        const fileName = makeUniqueName(normalizeAssetFileName(file.name, file.name), siblingNames);
+        const githubPath = getGitHubChildPath(folder, fileName);
+        const pathMessage = getProjectPathGuardMessage(githubPath || normalizeProjectPath(`${getProjectFilePath(projectTree, folder.id)}/${fileName}`));
+        if (pathMessage) {
+          pathRejectedImports.push(`${file.name}: ${pathMessage}`);
+          return null;
+        }
+        const importedFile = {
+          id: `file-${Date.now().toString(36)}-${index}`,
+          type: "file",
+          name: fileName,
+          ditaType: detectedType,
+          content: detectedType === "image" || detectedType === "asset" ? "" : result,
+          previewHref: detectedType === "image" || detectedType === "asset" ? result : undefined,
+          checkedInAt: "Imported",
+          githubPath: githubPath || undefined,
+          githubSha: githubPath ? "" : undefined,
+          githubLoaded: Boolean(githubPath),
+          localImportedAt: new Date().toISOString(),
+          localSize: file.size,
+          localMimeType: file.type || "",
+        };
+        siblingNames.push(importedFile);
+        return importedFile;
+      }).filter(Boolean);
+
+      if (pathRejectedImports.length) {
+        setExplorerSystemMessage(pathRejectedImports.slice(0, 2).join(" "), "warning");
+      }
+      if (!importedFiles.length) return;
 
       setProjectTree((tree) => updateProjectNode(tree, folder.id, (node) => ({
         ...node,
-        children: [...node.children, importedFile],
+        children: [...node.children, ...importedFiles],
       })));
-      setTabPanes((panes) => panes.map((pane) => (
-        pane.id === activePaneId
-          ? { ...pane, tabs: [...pane.tabs, importedFile.id], activeFileId: importedFile.id }
-          : pane
-      )));
-      setFileHistories((current) => ({
-        ...current,
-        [importedFile.id]: {
-          past: [],
-          present: importedFile.content,
-          future: [],
-        },
-      }));
-      setSelectedPathsByFile((current) => ({
-        ...current,
-        [importedFile.id]: [],
-      }));
-      setActiveFileId(importedFile.id);
-      setSelectedProjectId(importedFile.id);
-      setExplorerSystemMessage(`Imported ${fileName}`);
-    };
 
-    if (/^(avif|gif|jpe?g|png|svg|webp)$/i.test(extension)) {
-      reader.readAsDataURL(file);
-    } else {
-      reader.readAsText(file);
+      const editableImports = importedFiles.filter((file) => isTextEditableFile(file));
+      if (editableImports.length) {
+        setFileHistories((current) => {
+          const next = { ...current };
+          editableImports.forEach((file) => {
+            next[file.id] = {
+              past: [],
+              present: file.content || "",
+              future: [],
+            };
+          });
+          return next;
+        });
+      }
+
+      setSelectedPathsByFile((current) => {
+        const next = { ...current };
+        importedFiles.forEach((file) => {
+          next[file.id] = [];
+        });
+        return next;
+      });
+
+      const lastImported = importedFiles[importedFiles.length - 1];
+      const openableImports = importedFiles.filter((file) => getProjectFileKind(file) !== "asset");
+      const fileToOpen = openableImports[openableImports.length - 1];
+
+      if (fileToOpen) {
+        setTabPanes((panes) => panes.map((pane) => (
+          pane.id === activePaneId
+            ? {
+                ...pane,
+                tabs: pane.tabs.includes(fileToOpen.id) ? pane.tabs : [...pane.tabs, fileToOpen.id],
+                activeFileId: fileToOpen.id,
+              }
+            : pane
+        )));
+        setActiveFileId(fileToOpen.id);
+        if (isTextEditableFile(fileToOpen)) {
+          loadXmlIntoEditor(fileToOpen.content || "", fileToOpen.id);
+        }
+      }
+
+      setSelectedProjectId(lastImported.id);
+      if (isAuthenticated) {
+        const filesToPersist = importedFiles.filter((file) => file.githubPath);
+        if (filesToPersist.length) {
+          void Promise.all(filesToPersist.map((file) => saveImportedProjectFileDraft(file)))
+            .then(() => {
+              setExplorerSystemMessage(
+                `Imported and saved ${filesToPersist.length} file${filesToPersist.length === 1 ? "" : "s"} into ${folder.name}.${rejected.length ? ` ${rejected.length} file${rejected.length === 1 ? " was" : "s were"} blocked.` : ""}`,
+                rejected.length ? "warning" : "info",
+              );
+            })
+            .catch((error) => {
+              setExplorerSystemMessage(error instanceof Error ? error.message : "Imported locally, but could not save the file draft.", "error");
+            });
+        }
+      }
+      setExplorerSystemMessage(
+        `Imported ${importedFiles.length} file${importedFiles.length === 1 ? "" : "s"} into ${folder.name}.${rejected.length ? ` ${rejected.length} file${rejected.length === 1 ? " was" : "s were"} blocked.` : ""}`,
+        rejected.length ? "warning" : "info",
+      );
+    } catch (error) {
+      setExplorerSystemMessage(error instanceof Error ? error.message : "Could not import local files.", "error");
     }
+  }
+
+  function loadFile(file) {
+    if (!file) return;
+    void importLocalFilesIntoExplorer([file]);
   }
 
   function exportXml() {
@@ -11044,6 +12206,8 @@ function App() {
       setBottomPanelOpen(true);
     } else if (command === "specializations") {
       openSpecializationsTab();
+    } else if (command === "designSystem") {
+      openDesignSystemTab();
     } else if (command === "visualTemplates") {
       openVisualTemplatesTab();
     } else if (command === "createVisualTemplate") {
@@ -11054,6 +12218,8 @@ function App() {
       setVisualTemplateUploadOpen(true);
     } else if (command === "importVisualTemplate") {
       setVisualTemplateImportOpen(true);
+    } else if (command === "createNodeBindingTemplate") {
+      setNodeBindingTemplateDialogOpen(true);
     }
   }
 
@@ -11131,16 +12297,18 @@ function App() {
 
   function openVisualTemplatesTab(model = visualTemplateModel) {
     const paneId = activePaneId || "pane-left";
-    setFileHistories((current) => current[visualTemplatesTabId]
-      ? current
-      : {
-          ...current,
-          [visualTemplatesTabId]: {
-            past: [],
-            present: JSON.stringify(model, null, 2),
-            future: [],
-          },
-        });
+    const content = JSON.stringify(model, null, 2);
+    setFileHistories((current) => {
+      const currentHistory = current[visualTemplatesTabId];
+      return {
+        ...current,
+        [visualTemplatesTabId]: {
+          past: currentHistory?.past || [],
+          present: content,
+          future: currentHistory?.future || [],
+        },
+      };
+    });
     setTabPanes((panes) => panes.map((pane) => (
       pane.id === paneId
         ? {
@@ -11156,31 +12324,241 @@ function App() {
     setActiveSidePanel(null);
   }
 
+  function openDesignSystemTab() {
+    const paneId = activePaneId || "pane-left";
+    setDesignSystemDraft(designSystem);
+    setDesignSystemSaveStatus("idle");
+    setDesignSystemMessage("");
+    setFileHistories((current) => current[designSystemTabId]
+      ? current
+      : {
+          ...current,
+          [designSystemTabId]: {
+            past: [],
+            present: "",
+            future: [],
+          },
+        });
+    setTabPanes((panes) => panes.map((pane) => (
+      pane.id === paneId
+        ? {
+            ...pane,
+            tabs: pane.tabs.includes(designSystemTabId) ? pane.tabs : [...pane.tabs, designSystemTabId],
+            activeFileId: designSystemTabId,
+          }
+        : pane
+    )));
+    setActivePaneId(paneId);
+    setActiveFileId(designSystemTabId);
+    setSelectedProjectId(null);
+    setActiveSidePanel(null);
+    loadDesignSystem();
+  }
+
   function getVisualTemplateCatalog() {
-    const templates = [
-      {
+    const templates: any[] = [];
+
+    if (visualTemplateModel.artifactType === "template") {
+      const currentTemplate = getCurrentTemplateForBinding();
+      const currentTemplatePath = getVisualTemplateExistingPath();
+      templates.push({
+        ...currentTemplate,
+        description: currentTemplatePath
+          ? "Current visual template open in the designer."
+          : "Current unsaved visual template open in the designer.",
+        source: "current",
+        filePath: currentTemplatePath,
+        isCurrent: true,
+      });
+    }
+
+    if (!templates.some((template) => template.id === defaultVisualTemplateModel.template.id)) {
+      templates.push({
         id: defaultVisualTemplateModel.template.id,
         name: defaultVisualTemplateModel.template.name,
         description: "Default responsive topic deliverable layout with hero, body, summary, and sidebar containers.",
         source: "built-in",
         regions: defaultVisualTemplateModel.regions,
-      },
-    ];
-    const currentTemplate = visualTemplateModel.template;
-    if (currentTemplate?.id && !templates.some((template) => template.id === currentTemplate.id)) {
-      templates.push({
-        id: currentTemplate.id,
-        name: currentTemplate.name || "Current template",
-        description: "Template currently loaded in the designer.",
-        source: currentTemplate.source || "current",
-        regions: visualTemplateModel.regions,
       });
     }
+
+    collectProjectFiles(projectTree)
+      .filter(({ node }) => node.type === "file" && node.ditaType === "visual-template")
+      .forEach(({ node, path }) => {
+        const model = parseVisualTemplateModel(fileHistories[node.id]?.present || node.content || "");
+        if (templates.some((template) => template.fileId === node.id)) return;
+        templates.push({
+          id: model.template?.id || model.id || node.id,
+          fileId: node.id,
+          name: model.name || model.template?.name || node.name,
+          description: "Reusable visual template saved in the workspace.",
+          source: "workspace",
+          filePath: path,
+          regions: model.regions || [],
+        });
+      });
     return templates;
   }
 
-  function startTemplateBindingFromTemplate(template) {
-    const nextModel = normalizeVisualTemplateModel({
+  function getSavedVisualTemplateCatalog() {
+    return getVisualTemplateCatalog().filter((template) => (
+      template.source === "workspace" && Boolean(template.fileId) && Boolean(template.filePath)
+    ));
+  }
+
+  async function resolveSavedVisualTemplateForBinding(template) {
+    if (!template?.fileId) return template;
+
+    const projectFile = findProjectNode(projectTree, template.fileId)?.node;
+    const loadedFile = await loadGitHubFileIfNeeded(projectFile);
+    const content = fileHistories[template.fileId]?.present || loadedFile?.content || projectFile?.content || "";
+    const model = parseVisualTemplateModel(content);
+
+    return {
+      ...template,
+      id: model.template?.id || model.id || template.id || template.fileId,
+      fileId: template.fileId,
+      name: model.name || model.template?.name || template.name || projectFile?.name || "Visual template",
+      description: template.description || "Reusable visual template saved in the workspace.",
+      source: "workspace",
+      filePath: loadedFile?.githubPath || projectFile?.githubPath || template.filePath || "",
+      regions: Array.isArray(model.regions) ? model.regions : [],
+    };
+  }
+
+  function getNodeBindingRegionEntries(model: any) {
+    const candidates = Array.isArray(model?.bindingRegions)
+      ? model.bindingRegions
+      : Array.isArray(model?.regions)
+      ? model.regions
+      : [];
+    return candidates
+      .filter((region) => region?.id)
+      .map((region) => ({
+        id: region.id,
+        binding: region.binding || "",
+        bindingRule: getVisualTemplateRegionBindingRule(region, false),
+      }));
+  }
+
+  function getVisualTemplateFileForReference(templateReference: any) {
+    const templateFiles = collectProjectFiles(projectTree)
+      .filter(({ node }) => node.type === "file" && node.ditaType === "visual-template");
+    const referencePath = normalizeProjectPath(templateReference?.filePath || templateReference?.path || "");
+    const referenceId = String(templateReference?.fileId || templateReference?.id || "");
+    return templateFiles.find(({ node, path }) => {
+      const model = parseVisualTemplateModel(fileHistories[node.id]?.present || node.content || "");
+      const nodePath = normalizeProjectPath(path || node.githubPath || "");
+      return (
+        node.id === templateReference?.fileId ||
+        nodePath === referencePath ||
+        model.id === referenceId ||
+        model.template?.id === referenceId
+      );
+    }) || null;
+  }
+
+  function getVisualTemplateModelForReference(templateReference: any) {
+    if (!templateReference || templateReference.source === "built-in") {
+      return normalizeVisualTemplateModel(defaultVisualTemplateModel);
+    }
+
+    const match = getVisualTemplateFileForReference(templateReference);
+    if (!match) return null;
+
+    const content = fileHistories[match.node.id]?.present || match.node.content || "";
+    const sourceModel = parseVisualTemplateModel(content);
+    return normalizeVisualTemplateModel({
+      ...sourceModel,
+      artifactType: "template",
+      filePath: match.node.githubPath || match.path || sourceModel.filePath || "",
+    });
+  }
+
+  function hydrateNodeBindingTemplateModel(model: any) {
+    const normalizedModel = normalizeVisualTemplateModel(model);
+    if (normalizedModel.artifactType !== "node-binding-template") return normalizedModel;
+
+    const sourceTemplate = getVisualTemplateModelForReference(normalizedModel.template);
+    if (!sourceTemplate?.regions?.length) return normalizedModel;
+    return hydrateNodeBindingTemplateModelWithSource(normalizedModel, sourceTemplate);
+  }
+
+  function hydrateNodeBindingTemplateModelWithSource(model: any, sourceTemplate: any) {
+    const normalizedModel = normalizeVisualTemplateModel(model);
+    const bindingEntries = getNodeBindingRegionEntries(normalizedModel);
+    const bindingsByRegionId = new Map(bindingEntries.map((entry) => [entry.id, entry]));
+    const sourceRegionIds = new Set(sourceTemplate.regions.map((region) => region.id));
+    const orphanedBindings = bindingEntries.filter((entry) => !sourceRegionIds.has(entry.id));
+
+    return normalizeVisualTemplateModel({
+      ...normalizedModel,
+      template: {
+        ...normalizedModel.template,
+        id: sourceTemplate.template?.id || sourceTemplate.id || normalizedModel.template?.id,
+        name: sourceTemplate.name || sourceTemplate.template?.name || normalizedModel.template?.name,
+        source: normalizedModel.template?.source || "workspace",
+        filePath: sourceTemplate.filePath || normalizedModel.template?.filePath || "",
+      },
+      orphanedBindings,
+      regions: sourceTemplate.regions.map((region) => {
+        const bindingEntry = bindingsByRegionId.get(region.id) as any;
+        return {
+          ...region,
+          binding: bindingEntry?.binding || region.binding || "",
+          bindingRule: bindingEntry?.bindingRule || getEmptyVisualTemplateBindingRule(),
+        };
+      }),
+    });
+  }
+
+  function nodeBindingTemplateReferencesSource(model: any, sourceFileId: string, sourceFilePath: string, sourceTemplateModel: any) {
+    const templateReference = model?.template || {};
+    const referencePath = normalizeProjectPath(templateReference.filePath || templateReference.path || "");
+    const sourceTemplateId = String(sourceTemplateModel?.template?.id || sourceTemplateModel?.id || "");
+    const referenceId = String(templateReference.fileId || templateReference.id || "");
+    return (
+      templateReference.fileId === sourceFileId ||
+      (referencePath && referencePath === normalizeProjectPath(sourceFilePath)) ||
+      (sourceTemplateId && referenceId === sourceTemplateId)
+    );
+  }
+
+  function refreshOpenNodeBindingTemplatesForSource(sourceFileId: string, sourceFilePath: string, sourceTemplateModel: any) {
+    setFileHistories((current) => {
+      let changed = false;
+      const nextHistories = { ...current };
+      Object.entries(current).forEach(([fileId, history]: [string, any]) => {
+        const file = getEditorFileForId(fileId);
+        if (file?.ditaType !== "node-binding-template") return;
+        const model = parseVisualTemplateModel(history?.present || file.content || "");
+        if (!nodeBindingTemplateReferencesSource(model, sourceFileId, sourceFilePath, sourceTemplateModel)) return;
+        const hydratedModel = hydrateNodeBindingTemplateModelWithSource(model, sourceTemplateModel);
+        nextHistories[fileId] = {
+          ...history,
+          present: JSON.stringify(getPersistableVisualTemplateModel(hydratedModel), null, 2),
+        };
+        changed = true;
+      });
+      return changed ? nextHistories : current;
+    });
+  }
+
+  function getPersistableVisualTemplateModel(model: any) {
+    const normalizedModel = normalizeVisualTemplateModel(model);
+    if (normalizedModel.artifactType !== "node-binding-template") return normalizedModel;
+
+    const bindingRegions = getNodeBindingRegionEntries(normalizedModel);
+    return {
+      ...normalizedModel,
+      bindingRegions,
+      regions: bindingRegions,
+      bindingSources: [],
+    };
+  }
+
+  function createTemplateBindingModelFromTemplate(template, initialBinding: any = null) {
+    return normalizeVisualTemplateModel({
       ...defaultVisualTemplateModel,
       artifactType: "binding",
       id: `binding-${slugifySpecializationName(template.name || template.id || "template") || Date.now().toString(36)}`,
@@ -11189,19 +12567,395 @@ function App() {
         id: template.id,
         name: template.name,
         source: template.source || "template",
+        fileId: template.fileId || "",
+        filePath: template.filePath || "",
       },
       filePath: "",
+      bindingSources: initialBinding?.source ? [initialBinding.source] : [],
       regions: (template.regions || defaultVisualTemplateModel.regions).map((region) => ({
         ...region,
-        sourceFileId: undefined,
-        sourceKind: undefined,
-        sourceName: undefined,
-        sourcePath: undefined,
+        binding: "",
+        sourceFileId: initialBinding?.regionId === region.id ? initialBinding.source.id : undefined,
+        sourceKind: initialBinding?.regionId === region.id ? initialBinding.source.rootName : undefined,
+        sourceName: initialBinding?.regionId === region.id ? initialBinding.source.name : undefined,
+        sourcePath: initialBinding?.regionId === region.id ? initialBinding.source.path : undefined,
+        bindingRule: getEmptyVisualTemplateBindingRule(),
       })),
     });
+  }
+
+  function getVisualTemplateSourceDitaType(source: any) {
+    const rootName = String(source?.rootName || "").toLowerCase();
+    if (["concept", "task", "reference", "topic", "map"].includes(rootName)) return rootName;
+    const path = String(source?.path || source?.githubPath || source?.name || "").toLowerCase();
+    if (path.endsWith(".ditamap")) return "map";
+    return "topic";
+  }
+
+  function createNodeBindingTemplateModelFromTemplate(template, ditaBindingType = "") {
+    return normalizeVisualTemplateModel({
+      ...defaultVisualTemplateModel,
+      artifactType: "node-binding-template",
+      id: `node-binding-${slugifySpecializationName(template.name || template.id || "template") || Date.now().toString(36)}`,
+      name: `Binding - ${template.name || "Template"}`,
+      template: {
+        id: template.id,
+        name: template.name,
+        source: template.source || "template",
+        fileId: template.fileId || "",
+        filePath: template.filePath || "",
+      },
+      ditaBindingType,
+      filePath: "",
+      bindingSources: [],
+      bindingRegions: (template.regions || defaultVisualTemplateModel.regions).map((region) => ({
+        id: region.id,
+        binding: "",
+        bindingRule: getEmptyVisualTemplateBindingRule(),
+      })),
+      regions: (template.regions || defaultVisualTemplateModel.regions).map((region) => {
+        const {
+          sourceFileId,
+          sourceKind,
+          sourceName,
+          sourcePath,
+          ...reusableRegion
+        } = region;
+
+        return {
+          ...reusableRegion,
+          binding: "",
+          bindingRule: getEmptyVisualTemplateBindingRule(),
+        };
+      }),
+    });
+  }
+
+  function getUniqueNodeBindingTemplatePath(templateName = "template", targetFolderId = projectTree.id) {
+    const targetFolder = findProjectNode(projectTree, targetFolderId)?.node;
+    const folder = targetFolder?.type === "folder" ? targetFolder : projectTree;
+    const fileName = makeUniqueName(
+      normalizeFileName(slugifyWorkspaceArtifactName(`binding-${templateName}`) || "binding-template", "node-binding-template"),
+      folder.children || [],
+    );
+    const folderPath = typeof folder.githubPath === "string"
+      ? folder.githubPath
+      : getProjectFilePath(projectTree, folder.id).replace(/^content\//, "");
+    return normalizeProjectPath([folderPath, fileName].filter(Boolean).join("/"));
+  }
+
+  function createBindingModelFromNodeBindingTemplate(nodeBindingTemplate, source) {
+    const hydratedTemplate = hydrateNodeBindingTemplateModel(nodeBindingTemplate);
+    return normalizeVisualTemplateModel({
+      ...hydratedTemplate,
+      artifactType: "binding",
+      id: `binding-${slugifySpecializationName(hydratedTemplate.name || hydratedTemplate.id || "template") || Date.now().toString(36)}`,
+      name: `Binding - ${source?.name || hydratedTemplate.name || "Template"}`,
+      filePath: "",
+      bindingSources: source ? [source] : [],
+      appliedNodeBindingTemplate: {
+        id: hydratedTemplate.id,
+        name: hydratedTemplate.name,
+        ditaBindingType: hydratedTemplate.ditaBindingType || getVisualTemplateSourceDitaType(source),
+        visualTemplate: hydratedTemplate.template || null,
+      },
+      regions: (hydratedTemplate.regions || []).map((region) => ({
+        ...region,
+        sourceFileId: source?.id,
+        sourceKind: source?.rootName,
+        sourceName: source?.name,
+        sourcePath: source?.path,
+      })),
+    });
+  }
+
+  function getUniqueTemplateBindingOutputPath(source) {
+    const sourceStem = String(source?.name || "source").replace(/\.[^/.]+$/i, "");
+    const baseName = normalizeFileName(
+      slugifyWorkspaceArtifactName(`binding-${sourceStem}`) || "template-binding",
+      "visual-template-binding",
+    );
+    const activeMatch = activeFileId ? findProjectNode(projectTree, activeFileId) : null;
+    const targetFolder = activeMatch?.parent?.type === "folder" ? activeMatch.parent : projectTree;
+    const fileName = makeUniqueName(baseName, targetFolder.children || []);
+    const folderPath = targetFolder.githubPath ||
+      getProjectFilePath(projectTree, targetFolder.id).replace(/^content\//, "");
+    return normalizeProjectPath([folderPath, fileName].filter(Boolean).join("/"));
+  }
+
+  async function saveGeneratedTemplateBindingDraft(filePath: string, content: string, fileId: string) {
+    if (!isAuthenticated) {
+      appendTerminalMessage(`Created ${filePath.split("/").pop() || "template binding"} locally. Sign in before saving template binding drafts to Postgres.`, {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+        method: "PUT",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath,
+          githubSha: "",
+          sourceContentHash: "",
+          contentFormat: "visual-template-binding",
+          content,
+        }),
+      });
+      const body = await readBackendJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not save template binding draft.");
+      }
+
+      setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
+        id: fileId,
+        name: filePath.split("/").pop() || "template-binding.af-binding.json",
+        ditaType: "visual-template-binding",
+        content,
+        githubPath: filePath,
+        githubSha: "",
+        githubLoaded: true,
+        checkedInAt: "Draft",
+        sourceContentHash: body.draft?.source_content_hash || "",
+        draftContentHash: body.draft?.draft_content_hash || "",
+        draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+        draftDirty: Boolean(body.draft?.dirty),
+      }));
+    } catch (error) {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not save template binding draft.", {
+        level: "error",
+        source: "Templates",
+        open: false,
+      });
+    }
+  }
+
+  function openGeneratedTemplateBindingTab(model, source, options: { paneId?: string; replaceFileId?: string } = {}) {
+    const filePath = getUniqueTemplateBindingOutputPath(source);
+    const pathMessage = getProjectPathGuardMessage(filePath);
+    if (pathMessage) {
+      appendTerminalMessage(pathMessage, { level: "warning", source: "Templates", open: true });
+      return;
+    }
+
+    const fileName = filePath.split("/").pop() || "template-binding.af-binding.json";
+    const fileId = `github-file-${filePath}`;
+    const nextModel = normalizeVisualTemplateModel({
+      ...model,
+      filePath,
+    });
+    const content = JSON.stringify(getPersistableVisualTemplateModel(nextModel), null, 2);
+    const paneId = options.paneId || activePaneId || "pane-left";
+    const replaceFileId = options.replaceFileId || "";
+
+    setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
+      id: fileId,
+      name: fileName,
+      ditaType: "visual-template-binding",
+      content,
+      githubPath: filePath,
+      githubSha: "",
+      githubLoaded: true,
+      checkedInAt: "Draft",
+      draftDirty: true,
+      draftSavedAt: new Date().toISOString(),
+    }));
+    setFileHistories((current) => ({
+      ...current,
+      [fileId]: {
+        past: [],
+        present: content,
+        future: [],
+      },
+    }));
+    setTabPanes((panes) => panes.map((pane) => (
+      pane.id === paneId
+        ? {
+            ...pane,
+            tabs: pane.tabs.includes(fileId)
+              ? pane.tabs.filter((tabId) => tabId !== replaceFileId)
+              : pane.tabs.includes(replaceFileId)
+              ? pane.tabs.map((tabId) => tabId === replaceFileId ? fileId : tabId)
+              : [...pane.tabs, fileId],
+            activeFileId: fileId,
+          }
+        : pane
+    )));
+    setActivePaneId(paneId);
+    setActiveFileId(fileId);
+    setSelectedProjectId(fileId);
+    loadVisualTemplateModel(nextModel);
+    setVisualTemplateSourceId(source?.id || null);
+    setActiveSidePanel("templateBindings");
+    void saveGeneratedTemplateBindingDraft(filePath, content, fileId);
+  }
+
+  function getCurrentSourceVisualTemplateFile() {
+    return getVisualTemplateFileForReference(visualTemplateModel.template);
+  }
+
+  async function openSourceVisualTemplateTab() {
+    const sourceTemplateFile = getCurrentSourceVisualTemplateFile();
+    if (!sourceTemplateFile?.node?.id) {
+      appendTerminalMessage("This binding does not reference a saved source visual template.", {
+        level: "warning",
+        source: "Templates",
+        open: true,
+      });
+      return;
+    }
+    await openProjectFile(sourceTemplateFile.node.id, activePaneId);
+  }
+
+  function getCurrentTemplateForBinding() {
+    const currentTemplateSource = visualTemplateModel.template?.source || (visualTemplateModel.template?.id ? "current" : "unsaved");
+    return {
+      id: visualTemplateModel.template?.id || visualTemplateModel.id || `template-${Date.now().toString(36)}`,
+      name: visualTemplateModel.name || visualTemplateModel.template?.name || "Current template",
+      source: currentTemplateSource,
+      regions: visualTemplateModel.regions,
+    };
+  }
+
+  function startTemplateBindingFromTemplate(template) {
+    const nextModel = createTemplateBindingModelFromTemplate(template);
     loadVisualTemplateModel(nextModel);
     setVisualTemplateSourceId(null);
     openVisualTemplatesTab(nextModel);
+    setActiveSidePanel("templateSources");
+  }
+
+  async function startNodeBindingTemplateFromSelection(template, ditaBindingType = "concept", targetFolderId = projectTree.id) {
+    const resolvedTemplate = await resolveSavedVisualTemplateForBinding(template);
+    if (!resolvedTemplate?.regions?.length) {
+      appendTerminalMessage(`Select a saved visual template with at least one container or slot before creating a node-binding template.`, {
+        level: "warning",
+        source: "Templates",
+        open: true,
+      });
+      return;
+    }
+    const filePath = getUniqueNodeBindingTemplatePath(resolvedTemplate.name || resolvedTemplate.id || "template", targetFolderId);
+    const pathMessage = getProjectPathGuardMessage(filePath);
+    if (pathMessage) {
+      appendTerminalMessage(pathMessage, {
+        level: "warning",
+        source: "Templates",
+        open: true,
+      });
+      return;
+    }
+    const fileName = filePath.split("/").pop() || "binding-template.af-node-binding.json";
+    const fileId = `github-file-${filePath}`;
+    const nextModel = createNodeBindingTemplateModelFromTemplate(resolvedTemplate, ditaBindingType);
+    const nextModelWithPath = normalizeVisualTemplateModel({
+      ...nextModel,
+      filePath,
+    });
+    const content = JSON.stringify(getPersistableVisualTemplateModel(nextModelWithPath), null, 2);
+
+    setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
+      id: fileId,
+      name: fileName,
+      ditaType: "node-binding-template",
+      content,
+      githubPath: filePath,
+      githubSha: "",
+      githubLoaded: true,
+      checkedInAt: "Draft",
+      draftDirty: true,
+      draftSavedAt: new Date().toISOString(),
+    }));
+    setFileHistories((current) => ({
+      ...current,
+      [fileId]: {
+        past: [],
+        present: content,
+        future: [],
+      },
+    }));
+    setTabPanes((panes) => panes.map((pane) => (
+      pane.id === (activePaneId || "pane-left")
+        ? {
+            ...pane,
+            tabs: pane.tabs.includes(fileId) ? pane.tabs : [...pane.tabs, fileId],
+            activeFileId: fileId,
+          }
+        : pane
+    )));
+    setActivePaneId(activePaneId || "pane-left");
+    setActiveFileId(fileId);
+    setSelectedProjectId(fileId);
+    loadVisualTemplateModel(nextModelWithPath);
+    setVisualTemplateSourceId(null);
+    setActiveSidePanel("templateBindings");
+    setNodeBindingTemplateDialogOpen(false);
+
+    if (!isAuthenticated) {
+      appendTerminalMessage(`Created ${fileName} locally. Sign in before saving node-binding template drafts to Postgres.`, {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/drafts/github`, {
+        method: "PUT",
+        headers: {
+          ...(await getBackendAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath,
+          githubSha: "",
+          sourceContentHash: "",
+          contentFormat: "node-binding-template",
+          content,
+        }),
+      });
+      const body = await readBackendJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Could not create node-binding template draft.");
+      }
+
+      setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
+        id: fileId,
+        name: fileName,
+        ditaType: "node-binding-template",
+        content,
+        githubPath: filePath,
+        githubSha: "",
+        githubLoaded: true,
+        checkedInAt: "Draft",
+        sourceContentHash: body.draft?.source_content_hash || "",
+        draftContentHash: body.draft?.draft_content_hash || "",
+        draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
+        draftDirty: Boolean(body.draft?.dirty),
+      }));
+    } catch (error) {
+      appendTerminalMessage(error instanceof Error ? error.message : "Could not create node-binding template draft.", {
+        level: "error",
+        source: "Templates",
+        open: true,
+      });
+      return;
+    }
+
+    appendTerminalMessage(`Created draft ${fileName} from ${resolvedTemplate.name}.`, {
+      level: "info",
+      source: "Templates",
+      open: false,
+    });
   }
 
   function startVisualTemplateDesigner(template) {
@@ -11570,6 +13324,20 @@ function App() {
     };
   }
 
+  async function readBackendJson(response) {
+    const text = await response.text();
+    if (!text.trim()) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (!response.ok) {
+        return { error: text || response.statusText };
+      }
+      throw new Error("The backend returned an invalid JSON response.");
+    }
+  }
+
   async function refreshGitHubStatus() {
     setGithubStatusState("loading");
     setGithubMessage("");
@@ -11578,7 +13346,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/status`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load GitHub connection status.");
@@ -11608,7 +13376,7 @@ function App() {
         },
         body: JSON.stringify({ returnTo: window.location.origin }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not start GitHub connection.");
@@ -11629,7 +13397,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/repos`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load GitHub repositories.");
@@ -11651,7 +13419,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/branches`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load GitHub branches.");
@@ -11682,7 +13450,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/commits?${params.toString()}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load Git history.");
@@ -11707,7 +13475,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/local-commits?${params.toString()}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load pending local commits.");
@@ -11742,7 +13510,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/file-commits?${params.toString()}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load file Git history.");
@@ -11826,7 +13594,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/file-version?${params.toString()}`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load file content from that commit.");
@@ -11854,7 +13622,7 @@ function App() {
           content: restoredContent,
         }),
       });
-      const draftBody = await draftResponse.json();
+      const draftBody = await readBackendJson(draftResponse);
 
       if (!draftResponse.ok) {
         throw new Error(draftBody.error || "Could not save restored content as a draft.");
@@ -11912,7 +13680,7 @@ function App() {
         },
         body: JSON.stringify({ branchName }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not check out branch.");
@@ -11959,7 +13727,7 @@ function App() {
         },
         body: JSON.stringify({ branchName: nextBranch }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not check out branch.");
@@ -12009,7 +13777,7 @@ function App() {
         },
         body: JSON.stringify({ branchName, baseBranch: baseBranchOverride || gitBaseBranch }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not create branch.");
@@ -12044,7 +13812,7 @@ function App() {
         content,
       }),
     });
-    const body = await response.json();
+    const body = await readBackendJson(response);
 
     if (!response.ok) {
       throw new Error(body.error || `Could not save draft for ${node.name}.`);
@@ -12075,7 +13843,7 @@ function App() {
         },
         body: JSON.stringify({ path: node.githubPath }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || `Could not discard changes for ${displayName}.`);
@@ -12176,7 +13944,7 @@ function App() {
           message,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not create the local commit.");
@@ -12214,7 +13982,7 @@ function App() {
           localCommitIds: gitLocalCommits.map((commit) => commit.id),
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         if (response.status === 409 && Array.isArray(body.conflicts) && body.conflicts.length) {
@@ -12474,7 +14242,7 @@ function App() {
           specializations: activeSpecializationDefinitions,
         }),
       });
-      const validationResult = await validationResponse.json();
+      const validationResult = await readBackendJson(validationResponse);
 
       if (!validationResponse.ok) {
         throw new Error(validationResult.error || "Validation request failed.");
@@ -12555,7 +14323,7 @@ function App() {
           content: resolvedContent,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not save the resolved draft.");
@@ -12613,7 +14381,7 @@ function App() {
         },
         body: JSON.stringify({ fullName }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not select GitHub repository.");
@@ -12633,7 +14401,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/projects/tree`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not restore project tree.");
@@ -12676,7 +14444,7 @@ function App() {
       const response = await fetch(`${backendBaseUrl}/api/github/tree`, {
         headers: await getBackendAuthHeaders(),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not load the selected repository tree.");
@@ -12858,38 +14626,448 @@ function App() {
     );
   }
 
-  function createVisualTemplateSourceFromFile(node, path) {
-    const normalizedPath = normalizeProjectPath(path || node.githubPath || node.name || "");
-    const content = fileHistories[node.id]?.present ?? node.content ?? "";
-    const parsedSource = parseXml(content);
-    const rootName = parsedSource.doc?.documentElement?.tagName || node.ditaType || "xml";
-    const title = parsedSource.doc
-      ? parsedSource.doc.getElementsByTagName("title")[0]?.textContent?.trim() || node.name
-      : node.name;
-    const shortdesc = parsedSource.doc?.getElementsByTagName("shortdesc")[0]?.textContent?.trim() || "";
-    const body = parsedSource.doc
-      ? Array.from(parsedSource.doc.getElementsByTagName("p") as HTMLCollectionOf<Element>)
-          .slice(0, 3)
-          .map((paragraph) => paragraph.textContent?.trim())
-          .filter(Boolean)
-      : [];
-    const topicrefs = parsedSource.doc
-      ? Array.from(parsedSource.doc.getElementsByTagName("topicref") as HTMLCollectionOf<Element>)
-          .map((topicref) => topicref.getAttribute("href") || topicref.getAttribute("navtitle") || "")
-          .filter(Boolean)
-      : [];
-
-    return {
-      id: node.id,
-      name: node.name,
-      path: normalizedPath,
-      githubPath: normalizeProjectPath(node.githubPath || ""),
-      rootName,
-      title,
-      shortdesc,
-      body,
-      topicrefs,
+  function renderDesignSystemWorkbench() {
+    const tokenCount = designSystemDraft.tokens.length;
+    const styleClassCount = designSystemDraft.styleClasses.length;
+    const tokensByType = (types: DesignTokenType[]) => designSystemDraft.tokens.filter((token) => types.includes(token.type));
+    type StylePropertyOption = {
+      key: string;
+      label: string;
+      tokenTypes?: DesignTokenType[];
+      values?: string[];
     };
+    const boxStyleOptions: StylePropertyOption[] = [
+      { key: "backgroundColor", label: "Background color", tokenTypes: ["color"] as DesignTokenType[] },
+      { key: "borderColor", label: "Border color", tokenTypes: ["color"] as DesignTokenType[] },
+      { key: "borderStyle", label: "Border style", values: ["solid", "dashed", "dotted", "double", "none"] },
+      { key: "borderRadius", label: "Border radius", tokenTypes: ["radius", "number"] as DesignTokenType[] },
+      { key: "padding", label: "Padding", tokenTypes: ["space", "number"] as DesignTokenType[] },
+      { key: "gap", label: "Gap", tokenTypes: ["space", "number"] as DesignTokenType[] },
+      { key: "borderWidth", label: "Border width", tokenTypes: ["border", "space", "number"] as DesignTokenType[] },
+      { key: "boxShadow", label: "Shadow", tokenTypes: ["shadow"] as DesignTokenType[] },
+    ];
+    const textStyleOptions: StylePropertyOption[] = [
+      { key: "color", label: "Color", tokenTypes: ["color"] as DesignTokenType[] },
+      { key: "fontFamily", label: "Font family", tokenTypes: ["font-family"] as DesignTokenType[] },
+      { key: "fontSize", label: "Font size", tokenTypes: ["font-size", "number"] as DesignTokenType[] },
+      { key: "fontWeight", label: "Font weight", tokenTypes: ["font-weight"] as DesignTokenType[] },
+      { key: "lineHeight", label: "Line height", tokenTypes: ["space", "number"] as DesignTokenType[] },
+      { key: "textAlign", label: "Alignment", values: ["left", "center", "right"] },
+    ];
+    const propertyOptionsByField = {
+      style: boxStyleOptions,
+      textStyle: textStyleOptions,
+    };
+    const getStylePropertyOrder = (styleClass: StyleClass, field: "style" | "textStyle") => {
+      const orderField = field === "style" ? "styleOrder" : "textStyleOrder";
+      const properties = styleClass[field] || {};
+      const order = styleClass[orderField] || [];
+      return [
+        ...order.filter((property) => Object.prototype.hasOwnProperty.call(properties, property)),
+        ...Object.keys(properties).filter((property) => !order.includes(property)),
+      ];
+    };
+    const sortStylePropertyOptions = (
+      options: StylePropertyOption[],
+      styleClass: StyleClass,
+      field: "style" | "textStyle",
+    ) => {
+      const order = getStylePropertyOrder(styleClass, field);
+      return [...options].sort((a, b) => {
+        const aOrder = order.includes(a.key) ? order.indexOf(a.key) : order.length + options.findIndex((option) => option.key === a.key);
+        const bOrder = order.includes(b.key) ? order.indexOf(b.key) : order.length + options.findIndex((option) => option.key === b.key);
+        return aOrder - bOrder;
+      });
+    };
+    const hasDesignSystemChanges = JSON.stringify(designSystemDraft) !== JSON.stringify(designSystem);
+    const designSystemHeaderStatus = hasDesignSystemChanges
+      ? "unsaved"
+      : designSystemStatus === "ready"
+        ? "saved"
+        : "fallback";
+    const designSystemStatusLabel = designSystemHeaderStatus === "unsaved"
+      ? "Unsaved changes"
+      : designSystemHeaderStatus === "saved"
+        ? "Saved"
+        : "Using fallback defaults";
+
+    const getStyleValueOptions = (propertyKey: string, field: "style" | "textStyle") => {
+      const option = propertyOptionsByField[field].find((property) => property.key === propertyKey);
+      if (!option) return [];
+      if ("values" in option && option.values) {
+        return option.values.map((value) => ({ key: value, label: value, token: null as DesignToken | null }));
+      }
+      return tokensByType(option.tokenTypes || []).map((token) => ({
+        key: token.key,
+        label: `${token.key} - ${token.value}`,
+        token,
+      }));
+    };
+
+    const renderDesignTokenValueControl = (token: DesignToken, index: number) => {
+      if (token.type === "color") {
+        return (
+          <div className="design-system-token-value">
+            <label
+              className="design-token-swatch"
+              style={{ backgroundColor: token.value }}
+              title="Choose color"
+            >
+              <input
+                type="color"
+                value={/^#[0-9a-f]{6}$/i.test(token.value) ? token.value : "#ffffff"}
+                onChange={(event) => updateDesignToken(index, { value: event.target.value })}
+                aria-label="Choose token color"
+              />
+            </label>
+            <input
+              value={token.value}
+              onChange={(event) => updateDesignToken(index, { value: event.target.value })}
+              aria-label="Token value"
+            />
+          </div>
+        );
+      }
+      if (token.type === "font-family") {
+        return (
+          <div className="design-system-token-value no-swatch">
+            <select
+              value={token.value}
+              onChange={(event) => updateDesignToken(index, { value: event.target.value })}
+              aria-label="Font family token value"
+            >
+              {fontFamilyOptions.map((fontFamily) => (
+                <option key={fontFamily} value={fontFamily}>{fontFamily}</option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+      if (token.type === "font-weight") {
+        return (
+          <div className="design-system-token-value no-swatch">
+            <select
+              value={token.value}
+              onChange={(event) => updateDesignToken(index, { value: event.target.value })}
+              aria-label="Font weight token value"
+            >
+              {fontWeightOptions.map((fontWeight) => (
+                <option key={fontWeight} value={fontWeight}>{fontWeight}</option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+      const unitOptions = tokenUnitOptions[token.type];
+      if (unitOptions) {
+        const { amount, unit } = parseDimensionTokenValue(token.value, unitOptions[0]);
+        const selectedUnit = unitOptions.includes(unit) ? unit : unitOptions[0];
+        const commitTokenDimensionValue = (nextAmount: string, nextUnit: string) => {
+          if (nextAmount === "" || nextAmount === "-" || nextAmount === "." || nextAmount === "-.") return;
+          if (!Number.isFinite(Number(nextAmount))) return;
+          updateDesignToken(index, { value: `${nextAmount}${nextUnit}` });
+        };
+        return (
+          <div className="design-system-token-value no-swatch with-unit">
+            <input
+              type="number"
+              min={0}
+              step={token.type === "font-size" ? 1 : 0.25}
+              value={amount}
+              onChange={(event) => commitTokenDimensionValue(event.currentTarget.value, selectedUnit)}
+              aria-label={`${token.type} token amount`}
+            />
+            <select
+              value={selectedUnit}
+              onChange={(event) => commitTokenDimensionValue(amount || "0", event.target.value)}
+              aria-label={`${token.type} token unit`}
+            >
+              {unitOptions.map((unitOption) => (
+                <option key={unitOption} value={unitOption}>{unitOption}</option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+      if (token.type === "number") {
+        return (
+          <div className="design-system-token-value no-swatch">
+            <input
+              type="number"
+              step={1}
+              value={token.value}
+              onChange={(event) => {
+                if (event.currentTarget.value === "") return;
+                if (!Number.isFinite(event.currentTarget.valueAsNumber)) return;
+                updateDesignToken(index, { value: event.currentTarget.value });
+              }}
+              aria-label="Numeric token value"
+            />
+          </div>
+        );
+      }
+      return (
+        <div className="design-system-token-value no-swatch">
+          <input
+            value={token.value}
+            onChange={(event) => updateDesignToken(index, { value: event.target.value })}
+            aria-label="Token value"
+          />
+        </div>
+      );
+    };
+
+    const addStyleProperty = (index: number, field: "style" | "textStyle") => {
+      const styleClass = designSystemDraft.styleClasses[index];
+      const existingProperties = new Set(Object.keys((styleClass[field] || {}) as Record<string, unknown>));
+      const option = sortStylePropertyOptions(propertyOptionsByField[field], styleClass, field)
+        .find((property) => !existingProperties.has(property.key));
+      if (!option) return;
+      const firstValue = getStyleValueOptions(option.key, field)[0]?.key || "";
+      updateDesignStyleProperty(index, field, option.key, firstValue);
+    };
+
+    const renderStylePropertyTable = (
+      styleClass: StyleClass,
+      index: number,
+      field: "style" | "textStyle",
+      title: string,
+    ) => {
+      const propertyValues = (styleClass[field] || {}) as Record<string, unknown>;
+      const properties = getStylePropertyOrder(styleClass, field).map((property) => [property, propertyValues[property]] as const);
+      const usedProperties = new Set(properties.map(([property]) => property));
+      const orderedPropertyOptions = sortStylePropertyOptions(propertyOptionsByField[field], styleClass, field);
+      return (
+        <section className="design-system-style-panel">
+          <header>
+            <h4>{title}</h4>
+            <button type="button" onClick={() => addStyleProperty(index, field)}>+ Add</button>
+          </header>
+          <div className="design-system-style-head">
+            <span>Property</span>
+            <span>Token</span>
+          </div>
+          {properties.length ? properties.map(([property, value]) => {
+            const currentValue = String(value || "");
+            const valueOptions = getStyleValueOptions(property, field);
+            const currentToken = designSystemDraft.tokens.find((token) => token.key === currentValue);
+            const propertyOption = propertyOptionsByField[field].find((option) => option.key === property);
+            const showColorSwatch = Boolean(propertyOption?.tokenTypes?.includes("color") || currentToken?.type === "color");
+            const selectOptions = currentValue && !valueOptions.some((option) => option.key === currentValue)
+              ? [{ key: currentValue, label: currentValue, token: currentToken || null }, ...valueOptions]
+              : valueOptions;
+            return (
+              <div className="design-system-style-row" key={`${field}-${property}`}>
+                <select
+                  value={property}
+                  onChange={(event) => renameDesignStyleProperty(index, field, property, event.target.value)}
+                  aria-label={`${title} property`}
+                >
+                  {orderedPropertyOptions
+                    .filter((option) => option.key === property || !usedProperties.has(option.key))
+                    .map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                </select>
+                <div className={`design-system-token-value ${showColorSwatch ? "" : "no-swatch"}`}>
+                  {showColorSwatch ? (
+                    <span
+                      className={`design-token-swatch read-only ${currentToken?.type === "color" ? "" : "empty"}`}
+                      style={currentToken?.type === "color" ? { backgroundColor: currentToken.value } : undefined}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <select
+                    value={currentValue}
+                    onChange={(event) =>
+                      commitDesignStylePropertyValue(event.currentTarget, index, field, property)
+                    }
+                    aria-label={`${propertyOption?.label || property} token`}
+                  >
+                    <option value="">Not set</option>
+                    {selectOptions.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="design-system-delete-row"
+                  onClick={() => removeDesignStyleProperty(index, field, property)}
+                  aria-label={`Remove ${property}`}
+                >
+                  x
+                </button>
+              </div>
+            );
+          }) : (
+            <div className="design-system-empty-row">No properties yet.</div>
+          )}
+        </section>
+      );
+    };
+
+    return (
+      <div className="design-system-tab" ref={designSystemScrollRef}>
+        <header className="design-system-header">
+          <div className="design-system-header-main">
+            <div className="design-system-header-copy">
+              <span className="design-system-header-eyebrow">Team design system</span>
+              <strong className="design-system-header-title">Tokens &amp; Style Classes</strong>
+              <p>Manage reusable CSS tokens and outputclass-style presets used by visual templates and DITA authoring.</p>
+            </div>
+            <button
+              type="button"
+              className="design-system-save"
+              disabled={designSystemSaveStatus === "saving"}
+              onClick={saveDesignSystemDraft}
+            >
+              {designSystemSaveStatus === "saving" ? "Saving..." : "Save design system"}
+            </button>
+          </div>
+          <div className="design-system-header-meta">
+            <span className={`design-system-state-pill ${designSystemHeaderStatus}`}>
+              <span aria-hidden="true" />
+              {designSystemStatusLabel}
+            </span>
+            <span className="design-system-meta-divider" aria-hidden="true" />
+            <span className="design-system-count">
+              <strong>{tokenCount}</strong>
+              tokens
+            </span>
+            <span className="design-system-count secondary">
+              <strong>{styleClassCount}</strong>
+              style classes
+            </span>
+          </div>
+        </header>
+
+        {designSystemMessage ? (
+          <div className={`design-system-message ${designSystemSaveStatus === "error" ? "error" : ""} ${designSystemSaveStatus === "saved" ? "saved" : ""}`}>
+            {designSystemMessage}
+          </div>
+        ) : null}
+
+        <div className="design-system-grid">
+          <section className="design-system-card">
+            <header>
+              <div>
+                <h3>Design tokens</h3>
+                <p>Colors, spacing, radius, shadows, fonts, and other values.</p>
+              </div>
+              <button type="button" onClick={addDesignToken}>+ Add token</button>
+            </header>
+            <div className="design-system-token-table">
+              <div className="design-system-token-head">
+                <span>Key</span>
+                <span>Type</span>
+                <span>Value</span>
+                <span />
+              </div>
+              {designSystemDraft.tokens.map((token, index) => (
+                <div className="design-system-token-row" key={`${token.key}-${index}`}>
+                  <input
+                    value={token.key}
+                    onChange={(event) => updateDesignToken(index, { key: event.target.value })}
+                    aria-label="Token key"
+                  />
+                  <select
+                    value={token.type}
+                    onChange={(event) => {
+                      const nextType = event.target.value as DesignTokenType;
+                      updateDesignToken(index, {
+                        type: nextType,
+                        value: getDefaultDesignTokenValue(nextType),
+                      });
+                    }}
+                    aria-label="Token type"
+                  >
+                    {designTokenTypes.map((tokenType) => (
+                      <option key={tokenType} value={tokenType}>{tokenType}</option>
+                    ))}
+                  </select>
+                  {renderDesignTokenValueControl(token, index)}
+                  <button
+                    type="button"
+                    className="design-system-delete-row"
+                    onClick={() => removeDesignToken(index)}
+                    aria-label={`Remove ${token.key}`}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="design-system-card">
+            <header>
+              <div>
+                <h3>Style classes</h3>
+                <p>Reusable classes authors can apply to containers, slots, or DITA outputclass attributes.</p>
+              </div>
+              <button type="button" onClick={addDesignStyleClass}>+ Add class</button>
+            </header>
+            <div className="design-system-class-list">
+              {designSystemDraft.styleClasses.map((styleClass, index) => (
+                <article className="design-system-class-card" key={`${styleClass.key}-${index}`}>
+                  <div className="design-system-class-meta-head">
+                    <span>Name</span>
+                    <span>Key</span>
+                    <span>Applies to</span>
+                    <span />
+                  </div>
+                  <div className="design-system-class-meta-row">
+                      <input
+                        value={styleClass.displayName}
+                        onChange={(event) => updateDesignStyleClass(index, { displayName: event.target.value })}
+                        aria-label="Style class name"
+                      />
+                      <input
+                        value={styleClass.key}
+                        onChange={(event) => updateDesignStyleClass(index, { key: event.target.value })}
+                        aria-label="Style class key"
+                      />
+                      <select
+                        value={styleClass.appliesTo}
+                        onChange={(event) => updateDesignStyleClass(index, { appliesTo: event.target.value as StyleClassTarget })}
+                        aria-label="Style class target"
+                      >
+                        {styleClassTargets.map((target) => (
+                          <option key={target} value={target}>{target}</option>
+                        ))}
+                      </select>
+                    <button
+                      type="button"
+                      className="design-system-delete-row"
+                      onClick={() => removeDesignStyleClass(index)}
+                      aria-label={`Remove ${styleClass.displayName}`}
+                    >
+                      x
+                    </button>
+                  </div>
+                  <div className="design-system-style-fields">
+                    {renderStylePropertyTable(styleClass, index, "style", "Box style")}
+                    {renderStylePropertyTable(styleClass, index, "textStyle", "Text style")}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  function createVisualTemplateSourceFromFile(node, path) {
+    return createTemplateBindingSourceFromFile(
+      { node, path },
+      {
+        getFileContent: (fileNode) => fileHistories[fileNode.id]?.present ?? fileNode.content ?? "",
+        normalizePath: normalizeProjectPath,
+        parseXml,
+      },
+    );
   }
 
   function getVisualTemplateSources() {
@@ -12900,82 +15078,19 @@ function App() {
   }
 
   function getVisualTemplatePathVariants(value = "") {
-    const normalized = normalizeProjectPath(value);
-    const withoutContentRoot = normalized.replace(/^content\//, "");
-    const withContentRoot = withoutContentRoot ? normalizeProjectPath(`content/${withoutContentRoot}`) : "";
-    return new Set([normalized, withoutContentRoot, withContentRoot].filter(Boolean));
+    return getTemplateBindingPathVariants(value, normalizeProjectPath);
   }
 
   function visualTemplateSourceMatchesDrop(source, droppedSource) {
-    if (!source || !droppedSource) return false;
-    if (source.id && droppedSource.id && source.id === droppedSource.id) return true;
-
-    const sourcePaths = new Set([
-      ...getVisualTemplatePathVariants(source.path),
-      ...getVisualTemplatePathVariants(source.githubPath),
-      ...getVisualTemplatePathVariants(source.href),
-    ]);
-    const droppedPaths = [
-      ...getVisualTemplatePathVariants(droppedSource.path),
-      ...getVisualTemplatePathVariants(droppedSource.githubPath),
-      ...getVisualTemplatePathVariants(droppedSource.href),
-    ];
-
-    return droppedPaths.some((path) => sourcePaths.has(path));
+    return templateBindingSourceMatchesDrop(source, droppedSource, normalizeProjectPath);
   }
 
   function findVisualTemplateSourceForDrop(droppedSource, sources) {
-    return sources.find((source) => visualTemplateSourceMatchesDrop(source, droppedSource)) || null;
-  }
-
-  function getVisualTemplateBindingValue(source, binding: string) {
-    if (!source) {
-      if (binding === "bodyParagraphs") return ["Paragraph and section content will flow here."];
-      if (binding === "topicrefs") return [];
-      return "";
-    }
-
-    if (binding === "title") return source.title || source.name;
-    if (binding === "shortdesc") return source.shortdesc || "Short description slot";
-    if (binding === "bodyParagraphs") return source.body?.length ? source.body : ["Paragraph and section content will flow here."];
-    if (binding === "topicrefs") return source.topicrefs || [];
-    if (binding === "rootName") return source.rootName;
-    if (binding === "path") return source.path;
-    return "";
-  }
-
-  function getVisualTemplateBindingOptions(source) {
-    const baseOptions = [
-      { value: "title", label: "Title", detail: "Document title" },
-      { value: "shortdesc", label: "Shortdesc", detail: "Short description" },
-      { value: "bodyParagraphs", label: "Body paragraphs", detail: "Main content" },
-      { value: "topicrefs", label: "Topicrefs", detail: "Map links" },
-      { value: "rootName", label: "Root element", detail: "DITA type" },
-      { value: "path", label: "File path", detail: "Source path" },
-    ];
-
-    if (!source) return baseOptions.map((option) => ({ ...option, hasValue: false }));
-
-    return baseOptions.map((option) => {
-      const value = getVisualTemplateBindingValue(source, option.value);
-      const hasValue = Array.isArray(value) ? value.length > 0 : Boolean(String(value || "").trim());
-      return { ...option, hasValue };
-    });
-  }
-
-  function getVisualTemplateBindingPreview(source, binding: string) {
-    const value = getVisualTemplateBindingValue(source, binding);
-    if (Array.isArray(value)) {
-      if (!value.length) return "No values found";
-      return value.slice(0, 3).join(" · ");
-    }
-    return String(value || "No value found");
+    return findTemplateBindingSourceForDrop(droppedSource, sources, normalizeProjectPath);
   }
 
   function getVisualTemplateSourceLabel(source) {
-    if (!source) return "";
-    const title = source.title && source.title !== source.name ? ` — ${source.title}` : "";
-    return `${source.name}${title}`;
+    return getTemplateBindingSourceLabel(source);
   }
 
   function getVisualTemplateSlotLabel(binding = "") {
@@ -13003,6 +15118,10 @@ function App() {
     const normalizedModel = cloneVisualTemplateHistoryModel(nextModel);
     visualTemplateModelRef.current = normalizedModel;
     setVisualTemplateModel(normalizedModel);
+    if (normalizedModel.artifactType === "node-binding-template" || normalizedModel.artifactType === "binding") {
+      setVisualTemplateSelectedRegionId(normalizedModel.regions[0]?.id || null);
+      setActiveSidePanel("templateBindings");
+    }
     resetVisualTemplateHistory(normalizedModel);
   }
 
@@ -13088,7 +15207,7 @@ function App() {
       return;
     }
 
-    const source = getVisualTemplateBoundSources().find((item) => item.id === sourceId);
+    const source = getVisualTemplateAvailableBindingSources().find((item) => item.id === sourceId);
     if (!source) return;
     updateVisualTemplateRegion(regionId, {
       sourceFileId: source.id,
@@ -13097,6 +15216,18 @@ function App() {
       sourceKind: source.rootName,
     });
     setVisualTemplateSourceId(source.id);
+  }
+
+  function updateVisualTemplateRegionBindingRule(regionId: string, updates: Record<string, any>) {
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    const currentRule = getVisualTemplateRegionBindingRule(region, visualTemplateModel.artifactType !== "binding");
+    updateVisualTemplateRegion(regionId, {
+      bindingRule: {
+        ...currentRule,
+        ...updates,
+        selectorType: "xpath",
+      },
+    });
   }
 
   function updateVisualTemplateRegion(regionId: string, updates: Record<string, any>) {
@@ -13108,18 +15239,43 @@ function App() {
     }));
   }
 
+  function isVisualTemplateStructureReadOnly() {
+    return activeVisualTemplateStructureLocked ||
+      isVisualTemplateStructureLockedArtifactType(visualTemplateModel.artifactType);
+  }
+
   function startEditingVisualTemplateRegionLabel(region: any) {
+    if (isVisualTemplateStructureReadOnly()) return;
     setVisualTemplateSelectedRegionId(region.id);
     setVisualTemplateEditingRegionId(region.id);
     setVisualTemplateEditingLabel(region.label || (region.kind === "slot" ? "Slot" : "Container"));
   }
 
   function commitVisualTemplateRegionLabel() {
+    if (isVisualTemplateStructureReadOnly()) {
+      cancelVisualTemplateRegionLabelEdit();
+      return;
+    }
     if (!visualTemplateEditingRegionId) return;
     const region = visualTemplateModel.regions.find((item) => item.id === visualTemplateEditingRegionId);
-    const fallbackLabel = region?.kind === "slot" ? "Slot" : "Container";
-    const nextLabel = visualTemplateEditingLabel.trim() || fallbackLabel;
-    updateVisualTemplateRegion(visualTemplateEditingRegionId, { label: nextLabel });
+    if (!region) {
+      setVisualTemplateEditingRegionId(null);
+      setVisualTemplateEditingLabel("");
+      return;
+    }
+    const result = validateVisualTemplateRegionName(visualTemplateEditingRegionId, visualTemplateEditingLabel);
+    if (result.error) {
+      setVisualTemplateRegionNameError({ regionId: visualTemplateEditingRegionId, message: result.error });
+      setVisualTemplateSelectedRegionId(visualTemplateEditingRegionId);
+      window.setTimeout(() => {
+        const input = visualTemplateRegionNameInputRefs.current[visualTemplateEditingRegionId];
+        input?.focus();
+        input?.select();
+      }, 0);
+      return;
+    }
+    updateVisualTemplateRegion(visualTemplateEditingRegionId, { label: result.value });
+    setVisualTemplateRegionNameError((current) => (current?.regionId === visualTemplateEditingRegionId ? null : current));
     setVisualTemplateEditingRegionId(null);
     setVisualTemplateEditingLabel("");
   }
@@ -13159,13 +15315,32 @@ function App() {
           ? {
               ...region,
               [styleKey]: {
-                ...(styleKey === "style" ? visualTemplateStyleDefaults.style : visualTemplateStyleDefaults.textStyle),
                 ...(region[styleKey] || {}),
                 ...updates,
               },
             }
           : region
       )),
+    }));
+  }
+
+  function removeVisualTemplateRegionStyleProperties(
+    regionId: string,
+    styleKey: "style" | "textStyle",
+    properties: string[],
+  ) {
+    const propertySet = new Set(properties);
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((region) => {
+        if (region.id !== regionId) return region;
+        return {
+          ...region,
+          [styleKey]: Object.fromEntries(
+            Object.entries(region[styleKey] || {}).filter(([property]) => !propertySet.has(property)),
+          ),
+        };
+      }),
     }));
   }
 
@@ -13176,6 +15351,101 @@ function App() {
         region.id === regionId ? { ...region, ...updates } : region
       )),
     }));
+  }
+
+  function getVisualTemplateRegionNameValue(region: any) {
+    return Object.prototype.hasOwnProperty.call(visualTemplateRegionNameDrafts, region.id)
+      ? visualTemplateRegionNameDrafts[region.id]
+      : String(region.label || "");
+  }
+
+  function validateVisualTemplateRegionName(regionId: string, value: string) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) return { value: normalized, error: "Name is required." };
+    const duplicate = visualTemplateModel.regions.some((region) => (
+      region.id !== regionId && String(region.label || "").trim().toLowerCase() === normalized.toLowerCase()
+    ));
+    if (duplicate) return { value: normalized, error: "Name must be unique." };
+    return { value: normalized, error: "" };
+  }
+
+  function focusVisualTemplateRegionName(regionId: string) {
+    window.setTimeout(() => {
+      const input = visualTemplateRegionNameInputRefs.current[regionId];
+      input?.focus();
+    }, 0);
+  }
+
+  function commitVisualTemplateRegionName(regionId: string) {
+    if (isVisualTemplateStructureReadOnly()) {
+      cancelVisualTemplateRegionNameEdit(regionId);
+      return true;
+    }
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    if (!region) return true;
+    const draft = Object.prototype.hasOwnProperty.call(visualTemplateRegionNameDrafts, regionId)
+      ? visualTemplateRegionNameDrafts[regionId]
+      : String(region.label || "");
+    const result = validateVisualTemplateRegionName(regionId, draft);
+    if (result.error) {
+      setVisualTemplateRegionNameDrafts((current) => ({ ...current, [regionId]: draft }));
+      setVisualTemplateRegionNameError({ regionId, message: result.error });
+      setVisualTemplateSelectedRegionId(regionId);
+      focusVisualTemplateRegionName(regionId);
+      return false;
+    }
+    updateVisualTemplateRegionMeta(regionId, { label: result.value });
+    setVisualTemplateRegionNameDrafts((current) => {
+      const next = { ...current };
+      delete next[regionId];
+      return next;
+    });
+    setVisualTemplateRegionNameError((current) => (current?.regionId === regionId ? null : current));
+    return true;
+  }
+
+  function startVisualTemplateRegionNameEdit(region: any) {
+    if (isVisualTemplateStructureReadOnly()) return;
+    setVisualTemplateSelectedRegionId(region.id);
+    setVisualTemplateRegionNameDrafts((current) => ({
+      ...current,
+      [region.id]: String(region.label || ""),
+    }));
+    setVisualTemplateRegionNameError((current) => (current?.regionId === region.id ? null : current));
+  }
+
+  function openVisualTemplateLayerContextMenu(event: React.MouseEvent, regionId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isVisualTemplateStructureReadOnly()) return;
+    setVisualTemplateSelectedRegionId(regionId);
+    setVisualTemplateLayerContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      regionId,
+    });
+  }
+
+  function renameVisualTemplateLayerFromMenu(regionId: string) {
+    if (isVisualTemplateStructureReadOnly()) return;
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    if (!region) return;
+    startVisualTemplateRegionNameEdit(region);
+    focusVisualTemplateRegionName(regionId);
+  }
+
+  function updateVisualTemplateRegionNameDraft(regionId: string, value: string) {
+    setVisualTemplateRegionNameDrafts((current) => ({ ...current, [regionId]: value }));
+    setVisualTemplateRegionNameError((current) => (current?.regionId === regionId ? null : current));
+  }
+
+  function cancelVisualTemplateRegionNameEdit(regionId: string) {
+    setVisualTemplateRegionNameDrafts((current) => {
+      const next = { ...current };
+      delete next[regionId];
+      return next;
+    });
+    setVisualTemplateRegionNameError((current) => (current?.regionId === regionId ? null : current));
   }
 
   function getVisualTemplateLayerRows() {
@@ -13266,6 +15536,30 @@ function App() {
         return item;
       }),
     }));
+    setVisualTemplateSelectedRegionId(regionId);
+  }
+
+  function moveVisualTemplateLayerToEdge(regionId: string, edge: "front" | "back") {
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    if (!region) return;
+    const siblings = visualTemplateModel.regions
+      .filter((item) => (item.parentId || "") === (region.parentId || ""));
+    if (siblings.length < 2) return;
+
+    const zIndexes = siblings.map((item) => normalizeVisualTemplateLayout(item.layout).zIndex);
+    const nextZIndex = edge === "front"
+      ? Math.max(...zIndexes) + 1
+      : Math.min(...zIndexes) - 1;
+
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: current.regions.map((item) => (
+        item.id === regionId
+          ? { ...item, layout: { ...normalizeVisualTemplateLayout(item.layout), zIndex: nextZIndex } }
+          : item
+      )),
+    }));
+    setVisualTemplateSelectedRegionId(regionId);
   }
 
   function reorderVisualTemplateLayer(dragRegionId: string | null, targetRegionId: string) {
@@ -13300,6 +15594,38 @@ function App() {
     }));
   }
 
+  function getVisualTemplatePreviewPageSize(size: "desktop" | "tablet" | "phone") {
+    if (size === "phone") return { width: 390, height: 760 };
+    if (size === "tablet") return { width: 640, height: 760 };
+    return visualTemplatePageSize;
+  }
+
+  function fitVisualTemplateToScreen(pageSizeOverride?: { width: number; height: number }) {
+    const stage = visualTemplateStageRef.current;
+    if (!stage) return;
+    const pageSize = pageSizeOverride || getVisualTemplateActivePageSize();
+    const stageRect = stage.getBoundingClientRect();
+    const padding = 56;
+    const availableWidth = Math.max(120, stageRect.width - padding);
+    const availableHeight = Math.max(120, stageRect.height - padding);
+    const nextZoom = Math.max(
+      0.25,
+      Math.min(
+        4,
+        Math.floor(Math.min(
+          availableWidth / pageSize.width,
+          availableHeight / pageSize.height,
+        ) * 100) / 100,
+      ),
+    );
+    updateVisualTemplateGridSettings({ zoom: nextZoom });
+  }
+
+  function getVisualTemplateActivePageSize() {
+    if (!visualTemplatePreviewMode) return visualTemplatePageSize;
+    return getVisualTemplatePreviewPageSize(visualTemplatePreviewSize);
+  }
+
   function getVisualTemplateLayoutStyle(region: any): React.CSSProperties {
     const layout = normalizeVisualTemplateLayout(region?.layout);
     return {
@@ -13312,8 +15638,88 @@ function App() {
     };
   }
 
+  function getCssLengthValue(value: unknown): string | number | undefined {
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+    const text = String(value).trim();
+    if (!text) return undefined;
+    if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+    if (/^-?\d+(\.\d+)?(px|rem|em|pt|%|vh|vw)$/i.test(text)) return text;
+    return undefined;
+  }
+
+  function getCssLengthString(value: unknown, fallback: unknown): string {
+    const length = getCssLengthValue(value) ?? getCssLengthValue(fallback) ?? 0;
+    return typeof length === "number" ? `${length}px` : length;
+  }
+
+  function getCssTimeValue(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value === "number") return Number.isFinite(value) ? `${value}ms` : undefined;
+    const text = String(value).trim();
+    if (!text) return undefined;
+    if (/^-?\d+(\.\d+)?$/.test(text)) return `${Number(text)}ms`;
+    if (/^-?\d+(\.\d+)?(ms|s)$/i.test(text)) return text;
+    return undefined;
+  }
+
+  function isZeroCssLength(value: unknown) {
+    const length = getCssLengthValue(value);
+    if (typeof length === "number") return length === 0;
+    return /^0(?:\.0+)?(?:[a-z%]+)?$/i.test(String(length || "").trim());
+  }
+
+  function isSameVisualTemplateStyleValue(value: unknown, defaultValue: unknown) {
+    return String(value ?? "") === String(defaultValue ?? "");
+  }
+
+  function pruneVisualTemplateDefaultStyleValues(
+    style: Record<string, any> | undefined,
+    defaults: Record<string, any>,
+  ) {
+    const source = style && typeof style === "object" ? style : {};
+    return Object.fromEntries(Object.entries(source).filter(([key, value]) => (
+      value !== undefined &&
+      value !== null &&
+      value !== "" &&
+      !isSameVisualTemplateStyleValue(value, defaults[key])
+    )));
+  }
+
+  function getVisualTemplateStyleOverrides(
+    rawStyle: Record<string, any> | undefined,
+  ) {
+    const source = rawStyle && typeof rawStyle === "object" ? rawStyle : {};
+    return Object.fromEntries(Object.entries(source).filter(([, value]) => (
+      value !== undefined &&
+      value !== null &&
+      value !== ""
+    )));
+  }
+
+  function getResolvedVisualTemplateStyle(
+    rawStyle: Record<string, any> | undefined,
+    defaults: Record<string, any>,
+    classStyle: Record<string, unknown> = {},
+  ) {
+    const hasClassStyle = Object.keys(classStyle || {}).length > 0;
+    const localOverrides = Object.fromEntries(
+      Object.entries(getVisualTemplateStyleOverrides(rawStyle)).filter(([key, value]) => (
+        !hasClassStyle || !isSameVisualTemplateStyleValue(value, defaults[key])
+      )),
+    );
+    return normalizeVisualTemplateStyle(
+      localOverrides,
+      { ...defaults, ...classStyle },
+    );
+  }
+
   function getVisualTemplateCssStyle(region: any): React.CSSProperties {
-    const style = normalizeVisualTemplateStyle(region?.style, visualTemplateStyleDefaults.style);
+    const styleClass = getStyleClassForRegion(region, designSystem.styleClasses);
+    const classStyle = resolveStyleTokens(styleClass?.style || {}, designTokensByKey);
+    const classTextStyle = resolveStyleTokens(styleClass?.textStyle || {}, designTokensByKey);
+    const style = getResolvedVisualTemplateStyle(region?.style, visualTemplateStyleDefaults.style, classStyle);
+    const textStyle = getResolvedVisualTemplateStyle(region?.textStyle, visualTemplateStyleDefaults.textStyle, classTextStyle);
     const shadowPreset = String(style.shadowPreset || "none");
     const shadowValue = shadowPreset === "none"
       ? undefined
@@ -13321,59 +15727,110 @@ function App() {
         ? `0 18px 38px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 14)}`
         : shadowPreset === "lifted"
           ? `0 10px 18px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 18)}, 0 2px 6px ${rgbaFromHexColor(style.shadowColor || "#23406f", 10)}`
-          : `${Number(style.shadowX ?? 0)}px ${Number(style.shadowY ?? 12)}px ${Number(style.shadowBlur ?? 24)}px ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 12)}`;
+          : `${getCssLengthString(style.shadowX, 0)} ${getCssLengthString(style.shadowY, 12)} ${getCssLengthString(style.shadowBlur, 24)} ${rgbaFromHexColor(style.shadowColor || "#23406f", style.shadowOpacity ?? 12)}`;
     const animationName = String(style.animationName || "none");
-    const surfaceBackground = style.fillMode === "gradient"
+    const surfaceIsGradient = style.fillMode === "gradient";
+    const surfaceBackgroundImage = surfaceIsGradient
       ? `linear-gradient(${Number(style.gradientAngle ?? 135)}deg, ${style.gradientFrom || style.backgroundColor || "#ffffff"}, ${style.gradientTo || "#eef5ff"})`
-      : style.backgroundColor || undefined;
-    const imageBackground = style.backgroundImageMode === "image" && style.backgroundImage
-      ? cssUrlValue(style.backgroundImage)
       : "";
+    const surfaceBackgroundColor = style.backgroundColor || undefined;
+    const imageLayerOpacity = Math.max(0, Math.min(100, Number(style.backgroundOpacity ?? 100)));
+    const imageSourceBackground = style.backgroundImageMode === "image" && style.backgroundImage
+      ? cssUrlValue(resolveVisualTemplateBackgroundImage(style.backgroundImage))
+      : "";
+    const imageOpacityBackground = imageSourceBackground && imageLayerOpacity < 100
+      ? `linear-gradient(rgba(255, 255, 255, ${(100 - imageLayerOpacity) / 100}), rgba(255, 255, 255, ${(100 - imageLayerOpacity) / 100}))`
+      : "";
+    const imageBackground = imageSourceBackground;
     const overlayBackground = imageBackground && Number(style.backgroundOverlayOpacity || 0) > 0
       ? `linear-gradient(${rgbaFromHexColor(style.backgroundOverlayColor || "#000000", style.backgroundOverlayOpacity)}, ${rgbaFromHexColor(style.backgroundOverlayColor || "#000000", style.backgroundOverlayOpacity)})`
       : "";
-    const backgrounds = [overlayBackground, imageBackground, surfaceBackground].filter(Boolean);
-    const backgroundLayerCount = backgrounds.length;
-    const imageLayerPosition = style.backgroundPosition || "center";
+    const backgroundImages = [overlayBackground, imageOpacityBackground, imageBackground, surfaceBackgroundImage].filter(Boolean);
+    const imageLayerPosition = style.backgroundPosition === "custom"
+      ? `${Number(style.backgroundPositionX ?? 50)}% ${Number(style.backgroundPositionY ?? 50)}%`
+      : style.backgroundPosition || "center";
     const imageLayerRepeat = style.backgroundRepeat || "no-repeat";
-    const imageLayerSize = style.backgroundSize || "cover";
+    const imageLayerSize = style.backgroundSize === "custom"
+      ? style.backgroundSizeCustom || "auto"
+      : style.backgroundSize || "cover";
+    const backgroundPositionLayers = [
+      ...(overlayBackground ? ["center"] : []),
+      ...(imageOpacityBackground ? ["center"] : []),
+      ...(imageBackground ? [imageLayerPosition] : []),
+      ...(surfaceBackgroundImage ? ["center"] : []),
+    ];
+    const backgroundRepeatLayers = [
+      ...(overlayBackground ? ["no-repeat"] : []),
+      ...(imageOpacityBackground ? ["no-repeat"] : []),
+      ...(imageBackground ? [imageLayerRepeat] : []),
+      ...(surfaceBackgroundImage ? ["no-repeat"] : []),
+    ];
+    const backgroundSizeLayers = [
+      ...(overlayBackground ? ["cover"] : []),
+      ...(imageOpacityBackground ? ["cover"] : []),
+      ...(imageBackground ? [imageLayerSize] : []),
+      ...(surfaceBackgroundImage ? ["cover"] : []),
+    ];
+    const filterValues = [];
+    if (Number(style.backgroundFilterBlur || 0) > 0) filterValues.push(`blur(${Number(style.backgroundFilterBlur)}px)`);
+    if (Number(style.backgroundFilterBrightness ?? 100) !== 100) filterValues.push(`brightness(${Number(style.backgroundFilterBrightness)}%)`);
+    if (Number(style.backgroundFilterContrast ?? 100) !== 100) filterValues.push(`contrast(${Number(style.backgroundFilterContrast)}%)`);
+    if (Number(style.backgroundFilterSaturate ?? 100) !== 100) filterValues.push(`saturate(${Number(style.backgroundFilterSaturate)}%)`);
+    if (Number(style.backgroundFilterGrayscale || 0) > 0) filterValues.push(`grayscale(${Number(style.backgroundFilterGrayscale)}%)`);
     const layeredBackgroundPosition = imageBackground
-      ? (overlayBackground ? ["center", imageLayerPosition, "center"] : [imageLayerPosition, "center"]).slice(0, backgroundLayerCount).join(", ")
+      ? backgroundPositionLayers.join(", ")
       : undefined;
     const layeredBackgroundRepeat = imageBackground
-      ? (overlayBackground ? ["no-repeat", imageLayerRepeat, "no-repeat"] : [imageLayerRepeat, "no-repeat"]).slice(0, backgroundLayerCount).join(", ")
+      ? backgroundRepeatLayers.join(", ")
       : undefined;
     const layeredBackgroundSize = imageBackground
-      ? (overlayBackground ? ["cover", imageLayerSize, "cover"] : [imageLayerSize, "cover"]).slice(0, backgroundLayerCount).join(", ")
+      ? backgroundSizeLayers.join(", ")
       : undefined;
+    const visualBorderStyle = isZeroCssLength(style.borderWidth) ? "none" : String(style.borderStyle || "solid");
+    const visualBorderWidth = getCssLengthValue(style.borderWidth);
+    const visualBorderRadius = getCssLengthString(style.borderRadius, 0);
+    const hasVisibleBorder = !isZeroCssLength(style.borderWidth) && visualBorderStyle !== "none";
     return {
-      animationDelay: animationName === "none" ? undefined : `${Number(style.animationDelay ?? 0)}ms`,
-      animationDuration: animationName === "none" ? undefined : `${Number(style.animationDuration ?? 600)}ms`,
+      "--visual-region-border-color": String(style.borderColor || "transparent"),
+      "--visual-region-border-radius": visualBorderRadius,
+      "--visual-region-border-style": visualBorderStyle,
+      "--visual-region-border-width": String(visualBorderWidth ?? 0),
+      "--visual-region-guide-display": hasVisibleBorder ? "none" : "block",
+      "--visual-region-guide-radius": isZeroCssLength(style.borderRadius) ? "9px" : visualBorderRadius,
+      animationDelay: animationName === "none" ? undefined : getCssTimeValue(style.animationDelay ?? 0),
+      animationDuration: animationName === "none" ? undefined : getCssTimeValue(style.animationDuration ?? 600),
       animationName: animationName === "none" ? undefined : `visual-template-${animationName}`,
       animationTimingFunction: animationName === "none" ? undefined : "ease",
-      background: backgrounds.length ? backgrounds.join(", ") : undefined,
+      backgroundColor: surfaceBackgroundColor,
+      backgroundImage: backgroundImages.length ? backgroundImages.join(", ") : undefined,
       backgroundPosition: layeredBackgroundPosition,
       backgroundRepeat: layeredBackgroundRepeat,
       backgroundSize: layeredBackgroundSize,
-      borderColor: style.borderColor || undefined,
-      borderRadius: Number.isFinite(Number(style.borderRadius)) ? Number(style.borderRadius) : undefined,
-      borderStyle: style.borderWidth === 0 ? "none" : "dashed",
-      borderWidth: Number.isFinite(Number(style.borderWidth)) ? Number(style.borderWidth) : undefined,
+      backgroundBlendMode: imageBackground ? String(style.backgroundBlendMode || "normal") : undefined,
+      filter: filterValues.length ? filterValues.join(" ") : undefined,
+      borderColor: "transparent",
+      borderRadius: getCssLengthValue(style.borderRadius),
+      borderStyle: "solid",
+      borderWidth: 0,
       boxShadow: shadowValue,
       minHeight: region?.kind === "slot"
         ? undefined
-        : Number.isFinite(Number(style.minHeight)) ? Number(style.minHeight) : undefined,
-      padding: Number.isFinite(Number(style.padding)) ? Number(style.padding) : undefined,
-      textAlign: region?.textStyle?.textAlign || undefined,
-    };
+        : getCssLengthValue(style.minHeight),
+      padding: getCssLengthValue(style.padding),
+      textAlign: textStyle.textAlign || undefined,
+    } as React.CSSProperties;
   }
 
   function getVisualTemplateTextCssStyle(region: any): React.CSSProperties {
-    const textStyle = normalizeVisualTemplateStyle(region?.textStyle, visualTemplateStyleDefaults.textStyle);
+    const styleClass = getStyleClassForRegion(region, designSystem.styleClasses);
+    const classTextStyle = resolveStyleTokens(styleClass?.textStyle || {}, designTokensByKey);
+    const textStyle = getResolvedVisualTemplateStyle(region?.textStyle, visualTemplateStyleDefaults.textStyle, classTextStyle);
     return {
       color: textStyle.color || undefined,
-      fontSize: Number.isFinite(Number(textStyle.fontSize)) ? Number(textStyle.fontSize) : undefined,
-      fontWeight: Number.isFinite(Number(textStyle.fontWeight)) ? Number(textStyle.fontWeight) : undefined,
+      fontFamily: textStyle.fontFamily || undefined,
+      fontSize: getCssLengthValue(textStyle.fontSize),
+      fontWeight: textStyle.fontWeight as React.CSSProperties["fontWeight"],
+      lineHeight: getCssLengthValue(textStyle.lineHeight),
       textAlign: textStyle.textAlign || undefined,
     };
   }
@@ -13391,6 +15848,41 @@ function App() {
     ));
   }
 
+  function getVisualTemplateAbsoluteLayout(regionId: string) {
+    const regionsById = new Map<string, any>(visualTemplateModel.regions.map((region: any) => [region.id, region]));
+    const region = regionsById.get(regionId);
+    if (!region) return normalizeVisualTemplateLayout(null);
+    const layout = normalizeVisualTemplateLayout(region.layout);
+    if (!region.parentId) return layout;
+    const parentLayout = getVisualTemplateAbsoluteLayout(region.parentId);
+    return {
+      ...layout,
+      x: parentLayout.x + layout.x,
+      y: parentLayout.y + layout.y,
+    };
+  }
+
+  function getVisualTemplateSnapContext(regionId: string) {
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    if (!region?.parentId) {
+      return {
+        x: 0,
+        y: 0,
+        width: visualTemplatePageSize.width,
+        height: visualTemplatePageSize.height,
+      };
+    }
+    const parent = visualTemplateModel.regions.find((item) => item.id === region.parentId);
+    const parentAbsoluteLayout = getVisualTemplateAbsoluteLayout(region.parentId);
+    const parentLayout = normalizeVisualTemplateLayout(parent?.layout);
+    return {
+      x: parentAbsoluteLayout.x,
+      y: parentAbsoluteLayout.y,
+      width: parentLayout.width,
+      height: parentLayout.height,
+    };
+  }
+
   function snapVisualTemplateNumber(value: number, target: number, threshold: number) {
     return Math.abs(value - target) <= threshold ? target : value;
   }
@@ -13401,6 +15893,7 @@ function App() {
     dy: number,
     handle: VisualTemplateResizeHandle,
     regionKind?: string,
+    bounds = { width: visualTemplatePageSize.width, height: visualTemplatePageSize.height },
   ) {
     const layout = normalizeVisualTemplateLayout(startLayout);
     const minWidth = regionKind === "slot" ? 24 : 40;
@@ -13413,10 +15906,10 @@ function App() {
     let nextHeight = layout.height;
 
     if (handle.includes("e")) {
-      nextWidth = Math.max(minWidth, Math.min(visualTemplatePageSize.width - layout.x, layout.width + dx));
+      nextWidth = Math.max(minWidth, Math.min(bounds.width - layout.x, layout.width + dx));
     }
     if (handle.includes("s")) {
-      nextHeight = Math.max(minHeight, Math.min(visualTemplatePageSize.height - layout.y, layout.height + dy));
+      nextHeight = Math.max(minHeight, Math.min(bounds.height - layout.y, layout.height + dy));
     }
     if (handle.includes("w")) {
       nextX = Math.max(0, Math.min(startRight - minWidth, layout.x + dx));
@@ -13443,8 +15936,23 @@ function App() {
     resizeHandle: VisualTemplateResizeHandle = "se",
   ) {
     let layout = normalizeVisualTemplateLayout(rawLayout);
+    const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+    const snapContext = getVisualTemplateSnapContext(regionId);
+    const minWidth = region?.kind === "slot" ? 24 : 40;
+    const minHeight = region?.kind === "slot" ? 18 : 24;
     const guides: Array<{ axis: "x" | "y"; value: number; from: number; to: number; label?: string }> = [];
     const threshold = Number(gridSettings.snapThreshold || 4);
+    const edgeEpsilon = 0.5;
+    const moveWidth = layout.width;
+    const moveHeight = layout.height;
+    const rawMaxX = Math.max(0, snapContext.width - layout.width);
+    const rawMaxY = Math.max(0, snapContext.height - layout.height);
+    const dragTouchesLeft = mode !== "resize" && layout.x <= edgeEpsilon;
+    const dragTouchesTop = mode !== "resize" && layout.y <= edgeEpsilon;
+    const dragTouchesRight = mode !== "resize" && layout.x >= rawMaxX - edgeEpsilon;
+    const dragTouchesBottom = mode !== "resize" && layout.y >= rawMaxY - edgeEpsilon;
+    const resizeTouchesRight = mode === "resize" && resizeHandle.includes("e") && layout.x + layout.width >= snapContext.width - edgeEpsilon;
+    const resizeTouchesBottom = mode === "resize" && resizeHandle.includes("s") && layout.y + layout.height >= snapContext.height - edgeEpsilon;
 
     if (gridSettings.snapToGrid) {
       const gridSize = Number(gridSettings.gridSize || 16);
@@ -13452,24 +15960,24 @@ function App() {
       if (mode === "resize") {
         const right = layout.x + layout.width;
         const bottom = layout.y + layout.height;
-        const snappedLeft = snapVisualTemplateNumber(layout.x, snapGrid(layout.x), threshold);
-        const snappedTop = snapVisualTemplateNumber(layout.y, snapGrid(layout.y), threshold);
-        const snappedRight = snapVisualTemplateNumber(right, snapGrid(right), threshold);
-        const snappedBottom = snapVisualTemplateNumber(bottom, snapGrid(bottom), threshold);
+        const snappedLeft = snapGrid(snapContext.x + layout.x) - snapContext.x;
+        const snappedTop = snapGrid(snapContext.y + layout.y) - snapContext.y;
+        const snappedRight = snapGrid(snapContext.x + right) - snapContext.x;
+        const snappedBottom = snapGrid(snapContext.y + bottom) - snapContext.y;
         const left = resizeHandle.includes("w") ? snappedLeft : layout.x;
         const top = resizeHandle.includes("n") ? snappedTop : layout.y;
         layout = {
           ...layout,
           x: left,
           y: top,
-          width: Math.max(40, (resizeHandle.includes("e") ? snappedRight : right) - left),
-          height: Math.max(24, (resizeHandle.includes("s") ? snappedBottom : bottom) - top),
+          width: Math.max(minWidth, (resizeHandle.includes("e") ? snappedRight : right) - left),
+          height: Math.max(minHeight, (resizeHandle.includes("s") ? snappedBottom : bottom) - top),
         };
       } else {
         layout = {
           ...layout,
-          x: snapVisualTemplateNumber(layout.x, snapGrid(layout.x), threshold),
-          y: snapVisualTemplateNumber(layout.y, snapGrid(layout.y), threshold),
+          x: snapGrid(snapContext.x + layout.x) - snapContext.x,
+          y: snapGrid(snapContext.y + layout.y) - snapContext.y,
         };
       }
     }
@@ -13485,13 +15993,13 @@ function App() {
       });
       const xCandidates = [
         { kind: "left", value: 0 },
-        { kind: "centerX", value: visualTemplatePageSize.width / 2 },
-        { kind: "right", value: visualTemplatePageSize.width },
+        { kind: "centerX", value: snapContext.width / 2 },
+        { kind: "right", value: snapContext.width },
       ];
       const yCandidates = [
         { kind: "top", value: 0 },
-        { kind: "centerY", value: visualTemplatePageSize.height / 2 },
-        { kind: "bottom", value: visualTemplatePageSize.height },
+        { kind: "centerY", value: snapContext.height / 2 },
+        { kind: "bottom", value: snapContext.height },
       ];
 
       for (const peer of getVisualTemplateSnapPeers(regionId)) {
@@ -13529,26 +16037,38 @@ function App() {
           if (!match) continue;
           if (axis === "x") {
             if (mode === "resize" && edgeKey === "right") {
-              layout = { ...layout, width: Math.max(40, match.value - layout.x) };
+              layout = { ...layout, width: Math.max(minWidth, match.value - layout.x) };
             } else if (mode === "resize" && edgeKey === "left") {
               const right = layout.x + layout.width;
-              layout = { ...layout, x: Math.max(0, Math.min(right - 40, match.value)), width: Math.max(40, right - match.value) };
+              layout = { ...layout, x: Math.max(0, Math.min(right - minWidth, match.value)), width: Math.max(minWidth, right - match.value) };
             } else if (mode !== "resize") {
               const offset = edgeKey === "left" ? 0 : edgeKey === "centerX" ? layout.width / 2 : layout.width;
-              layout = { ...layout, x: Math.max(0, Math.min(visualTemplatePageSize.width - layout.width, match.value - offset)) };
+              layout = { ...layout, x: Math.max(0, Math.min(snapContext.width - layout.width, match.value - offset)) };
             }
-            guides.push({ axis: "x", value: match.value, from: 0, to: visualTemplatePageSize.height, label: match.kind });
+            guides.push({
+              axis: "x",
+              value: snapContext.x + match.value,
+              from: snapContext.y,
+              to: snapContext.y + snapContext.height,
+              label: match.kind,
+            });
           } else {
             if (mode === "resize" && edgeKey === "bottom") {
-              layout = { ...layout, height: Math.max(24, match.value - layout.y) };
+              layout = { ...layout, height: Math.max(minHeight, match.value - layout.y) };
             } else if (mode === "resize" && edgeKey === "top") {
               const bottom = layout.y + layout.height;
-              layout = { ...layout, y: Math.max(0, Math.min(bottom - 24, match.value)), height: Math.max(24, bottom - match.value) };
+              layout = { ...layout, y: Math.max(0, Math.min(bottom - minHeight, match.value)), height: Math.max(minHeight, bottom - match.value) };
             } else if (mode !== "resize") {
               const offset = edgeKey === "top" ? 0 : edgeKey === "centerY" ? layout.height / 2 : layout.height;
-              layout = { ...layout, y: Math.max(0, Math.min(visualTemplatePageSize.height - layout.height, match.value - offset)) };
+              layout = { ...layout, y: Math.max(0, Math.min(snapContext.height - layout.height, match.value - offset)) };
             }
-            guides.push({ axis: "y", value: match.value, from: 0, to: visualTemplatePageSize.width, label: match.kind });
+            guides.push({
+              axis: "y",
+              value: snapContext.y + match.value,
+              from: snapContext.x,
+              to: snapContext.x + snapContext.width,
+              label: match.kind,
+            });
           }
           break;
         }
@@ -13558,28 +16078,74 @@ function App() {
       snapAxis("y", yCandidates);
     }
 
-    layout = {
-      ...layout,
-      x: Math.max(0, Math.min(visualTemplatePageSize.width - layout.width, layout.x)),
-      y: Math.max(0, Math.min(visualTemplatePageSize.height - layout.height, layout.y)),
-      width: Math.max(40, Math.min(visualTemplatePageSize.width - layout.x, layout.width)),
-      height: Math.max(24, Math.min(visualTemplatePageSize.height - layout.y, layout.height)),
-    };
+    if (mode !== "resize") {
+      const maxX = Math.max(0, snapContext.width - moveWidth);
+      const maxY = Math.max(0, snapContext.height - moveHeight);
+      layout = {
+        ...layout,
+        x: dragTouchesLeft ? 0 : dragTouchesRight ? maxX : Math.max(0, Math.min(maxX, layout.x)),
+        y: dragTouchesTop ? 0 : dragTouchesBottom ? maxY : Math.max(0, Math.min(maxY, layout.y)),
+        width: moveWidth,
+        height: moveHeight,
+      };
+    } else {
+      layout = {
+        ...layout,
+        x: Math.max(0, Math.min(snapContext.width - layout.width, layout.x)),
+        y: Math.max(0, Math.min(snapContext.height - layout.height, layout.y)),
+        width: Math.max(minWidth, Math.min(snapContext.width - layout.x, layout.width)),
+        height: Math.max(minHeight, Math.min(snapContext.height - layout.y, layout.height)),
+      };
+      layout = {
+        ...layout,
+        width: resizeTouchesRight ? Math.max(minWidth, snapContext.width - layout.x) : layout.width,
+        height: resizeTouchesBottom ? Math.max(minHeight, snapContext.height - layout.y) : layout.height,
+      };
+    }
 
     return { layout, guides: guides.slice(0, 4) };
+  }
+
+  function snapVisualTemplateLayoutToGridContext(
+    rawLayout: Record<string, number>,
+    snapContext: { x: number; y: number; width: number; height: number },
+    minWidth = 40,
+    minHeight = 24,
+    gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings),
+  ) {
+    const layout = normalizeVisualTemplateLayout(rawLayout);
+    if (!gridSettings.snapToGrid) return layout;
+
+    const gridSize = Number(gridSettings.gridSize || 16);
+    const snapGrid = (value: number) => Math.round(value / gridSize) * gridSize;
+    const left = snapGrid(snapContext.x + layout.x) - snapContext.x;
+    const top = snapGrid(snapContext.y + layout.y) - snapContext.y;
+    const right = snapGrid(snapContext.x + layout.x + layout.width) - snapContext.x;
+    const bottom = snapGrid(snapContext.y + layout.y + layout.height) - snapContext.y;
+    const clampedLeft = Math.max(0, Math.min(snapContext.width - minWidth, left));
+    const clampedTop = Math.max(0, Math.min(snapContext.height - minHeight, top));
+
+    return {
+      ...layout,
+      x: clampedLeft,
+      y: clampedTop,
+      width: Math.max(minWidth, Math.min(snapContext.width - clampedLeft, right - clampedLeft)),
+      height: Math.max(minHeight, Math.min(snapContext.height - clampedTop, bottom - clampedTop)),
+    };
   }
 
   function alignVisualTemplateSelection(alignment: "left" | "center" | "right" | "top" | "middle" | "bottom") {
     const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
     if (!selectedRegion) return;
     const layout = normalizeVisualTemplateLayout(selectedRegion.layout);
+    const alignmentContext = getVisualTemplateSnapContext(selectedRegion.id);
     const updates: Record<string, number> = {};
     if (alignment === "left") updates.x = 0;
-    if (alignment === "center") updates.x = Math.round((visualTemplatePageSize.width - layout.width) / 2);
-    if (alignment === "right") updates.x = visualTemplatePageSize.width - layout.width;
+    if (alignment === "center") updates.x = Math.round((alignmentContext.width - layout.width) / 2);
+    if (alignment === "right") updates.x = alignmentContext.width - layout.width;
     if (alignment === "top") updates.y = 0;
-    if (alignment === "middle") updates.y = Math.round((visualTemplatePageSize.height - layout.height) / 2);
-    if (alignment === "bottom") updates.y = visualTemplatePageSize.height - layout.height;
+    if (alignment === "middle") updates.y = Math.round((alignmentContext.height - layout.height) / 2);
+    if (alignment === "bottom") updates.y = alignmentContext.height - layout.height;
     updateVisualTemplateRegionLayout(selectedRegion.id, updates);
   }
 
@@ -13628,11 +16194,17 @@ function App() {
   }
 
   function handleVisualTemplateMeasurePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (!visualTemplateMeasureMode || event.target !== event.currentTarget) return;
+    if (event.button !== 0 || !visualTemplateMeasureMode || event.target !== event.currentTarget) return;
     const point = getVisualTemplateCanvasPoint(event);
     if (!point) return;
     event.preventDefault();
     setVisualTemplateMeasurement({ startX: point.x, startY: point.y, endX: point.x, endY: point.y, measuring: true });
+  }
+
+  function handleVisualTemplateSurfaceContextMenu(event: React.MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeTransientContextMenus();
   }
 
   function handleVisualTemplateMeasurePointerMove(event: React.PointerEvent<HTMLDivElement>) {
@@ -13652,6 +16224,11 @@ function App() {
     mode: "move" | "resize",
     handle?: VisualTemplateResizeHandle,
   ) {
+    if (isVisualTemplateStructureReadOnly()) {
+      event.stopPropagation();
+      setVisualTemplateSelectedRegionId(region.id);
+      return;
+    }
     if (region.locked) {
       event.stopPropagation();
       setVisualTemplateSelectedRegionId(region.id);
@@ -13674,9 +16251,25 @@ function App() {
   }
 
   function addVisualTemplateContainer() {
+    if (isVisualTemplateStructureReadOnly()) return;
     const customCount = visualTemplateModel.regions.filter((region) => String(region.id || "").startsWith("container-")).length + 1;
     const id = `container-${Date.now()}`;
-    const offset = Math.min(120, customCount * 18);
+    const offset = Math.min(128, customCount * 16);
+    const layout = snapVisualTemplateLayoutToGridContext(
+      {
+        x: 64 + offset,
+        y: 80 + offset,
+        width: 256,
+        height: 160,
+        zIndex: customCount + 2,
+      },
+      {
+        x: 0,
+        y: 0,
+        width: visualTemplatePageSize.width,
+        height: visualTemplatePageSize.height,
+      },
+    );
     const nextRegion = {
       id,
       label: `Container ${customCount}`,
@@ -13684,21 +16277,9 @@ function App() {
       role: "custom",
       binding: "bodyParagraphs",
       notes: "Custom layout container.",
-      layout: {
-        x: 72 + offset,
-        y: 76 + offset,
-        width: 260,
-        height: 160,
-        zIndex: customCount + 2,
-      },
-      style: {
-        ...visualTemplateStyleDefaults.style,
-        backgroundColor: "#ffffff",
-        borderColor: "#9bbcf2",
-      },
-      textStyle: {
-        ...visualTemplateStyleDefaults.textStyle,
-      },
+      layout,
+      style: {},
+      textStyle: {},
     };
 
     applyVisualTemplateModelUpdate((current) => ({
@@ -13708,7 +16289,141 @@ function App() {
     setVisualTemplateSelectedRegionId(id);
   }
 
+  function getVisualTemplateCopyLabel(label: string, existingLabels: Set<string>, fallbackLabel = "Container") {
+    const baseLabel = String(label || fallbackLabel).replace(/\s+copy(?:\s+\d+)?$/i, "").trim() || fallbackLabel;
+    let candidate = `${baseLabel} copy`;
+    let index = 2;
+    while (existingLabels.has(candidate.toLowerCase())) {
+      candidate = `${baseLabel} copy ${index}`;
+      index += 1;
+    }
+    existingLabels.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  function duplicateVisualTemplateRegion(regionId = visualTemplateSelectedRegionId) {
+    if (isVisualTemplateStructureReadOnly()) return;
+    if (!regionId) return;
+    const sourceRegion = visualTemplateModel.regions.find((region) => region.id === regionId);
+    if (!sourceRegion) return;
+    if (sourceRegion.kind === "slot") {
+      duplicateVisualTemplateSlot(regionId);
+      return;
+    }
+    duplicateVisualTemplateContainer(regionId);
+  }
+
+  function duplicateVisualTemplateContainer(regionId = visualTemplateSelectedRegionId) {
+    if (!regionId) return;
+    const sourceRegion = visualTemplateModel.regions.find((region) => region.id === regionId);
+    if (!sourceRegion || sourceRegion.kind === "slot") return;
+
+    const regionsById = new Map<string, any>(visualTemplateModel.regions.map((region: any) => [region.id, region]));
+    const descendants: any[] = [];
+    const collectDescendants = (parentId: string) => {
+      visualTemplateModel.regions.forEach((region) => {
+        if (region.parentId !== parentId) return;
+        descendants.push(region);
+        collectDescendants(region.id);
+      });
+    };
+    collectDescendants(sourceRegion.id);
+
+    const existingLabels = new Set<string>(visualTemplateModel.regions.map((region) => String(region.label || "").toLowerCase()));
+    const idMap = new Map<string, string>();
+    const timestamp = Date.now();
+    [sourceRegion, ...descendants].forEach((region, index) => {
+      idMap.set(region.id, `${region.kind === "slot" ? "slot" : "container"}-${timestamp}-${index}`);
+    });
+
+    const sourceLayout = normalizeVisualTemplateLayout(sourceRegion.layout);
+    const snapContext = getVisualTemplateSnapContext(sourceRegion.id);
+    const duplicateOffset = 32;
+    const nextLayout = snapVisualTemplateLayoutToGridContext(
+      { ...sourceLayout, x: sourceLayout.x + duplicateOffset, y: sourceLayout.y + duplicateOffset },
+      snapContext,
+      40,
+      24,
+    );
+    const maxZIndex = visualTemplateModel.regions.reduce((max, region) => (
+      Math.max(max, Number(normalizeVisualTemplateLayout(region.layout).zIndex || 0))
+    ), 0);
+
+    const cloneRegion = (region: any, index: number) => {
+      const cloned = JSON.parse(JSON.stringify(region));
+      cloned.id = idMap.get(region.id);
+      cloned.label = getVisualTemplateCopyLabel(region.label, existingLabels, region.kind === "slot" ? "Slot" : "Container");
+      cloned.parentId = region.id === sourceRegion.id
+        ? region.parentId
+        : idMap.get(region.parentId) || region.parentId;
+      cloned.sourceFileId = undefined;
+      cloned.sourcePath = undefined;
+      cloned.sourceName = undefined;
+      cloned.sourceKind = undefined;
+      cloned.layout = {
+        ...normalizeVisualTemplateLayout(region.layout),
+        zIndex: maxZIndex + index + 1,
+      };
+      if (region.id === sourceRegion.id) {
+        cloned.layout.x = nextLayout.x;
+        cloned.layout.y = nextLayout.y;
+        cloned.layout.width = nextLayout.width;
+        cloned.layout.height = nextLayout.height;
+      }
+      return cloned;
+    };
+
+    const copiedRegions = [sourceRegion, ...descendants].map(cloneRegion);
+    const copiedContainerId = idMap.get(sourceRegion.id) || null;
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: [...current.regions, ...copiedRegions],
+    }));
+    setVisualTemplateSelectedRegionId(copiedContainerId);
+    if (copiedContainerId) {
+      setVisualTemplateExpandedLayerIds((current) => new Set([...current, copiedContainerId]));
+    }
+  }
+
+  function duplicateVisualTemplateSlot(regionId = visualTemplateSelectedRegionId) {
+    if (!regionId) return;
+    const sourceRegion = visualTemplateModel.regions.find((region) => region.id === regionId);
+    if (!sourceRegion || sourceRegion.kind !== "slot") return;
+
+    const existingLabels = new Set<string>(visualTemplateModel.regions.map((region) => String(region.label || "").toLowerCase()));
+    const sourceLayout = normalizeVisualTemplateLayout(sourceRegion.layout);
+    const snapContext = getVisualTemplateSnapContext(sourceRegion.id);
+    const duplicateOffset = 16;
+    const nextLayout = snapVisualTemplateLayoutToGridContext(
+      { ...sourceLayout, x: sourceLayout.x + duplicateOffset, y: sourceLayout.y + duplicateOffset },
+      snapContext,
+      24,
+      18,
+    );
+    const maxZIndex = visualTemplateModel.regions.reduce((max, region) => (
+      Math.max(max, Number(normalizeVisualTemplateLayout(region.layout).zIndex || 0))
+    ), 0);
+    const copiedSlot = JSON.parse(JSON.stringify(sourceRegion));
+    copiedSlot.id = `slot-${Date.now()}`;
+    copiedSlot.label = getVisualTemplateCopyLabel(sourceRegion.label, existingLabels, "Slot");
+    copiedSlot.sourceFileId = undefined;
+    copiedSlot.sourcePath = undefined;
+    copiedSlot.sourceName = undefined;
+    copiedSlot.sourceKind = undefined;
+    copiedSlot.layout = {
+      ...nextLayout,
+      zIndex: maxZIndex + 1,
+    };
+
+    applyVisualTemplateModelUpdate((current) => ({
+      ...current,
+      regions: [...current.regions, copiedSlot],
+    }));
+    setVisualTemplateSelectedRegionId(copiedSlot.id);
+  }
+
   function deleteVisualTemplateContainer(regionId = visualTemplateSelectedRegionId) {
+    if (isVisualTemplateStructureReadOnly()) return;
     if (!regionId) return;
     applyVisualTemplateModelUpdate((current) => {
       const idsToDelete = new Set([regionId]);
@@ -13742,6 +16457,7 @@ function App() {
   }
 
   function clearVisualTemplateCanvas() {
+    if (isVisualTemplateStructureReadOnly()) return;
     applyVisualTemplateModelUpdate((current) => ({
       ...current,
       regions: [],
@@ -13750,6 +16466,7 @@ function App() {
   }
 
   function addVisualTemplateSlot() {
+    if (isVisualTemplateStructureReadOnly()) return;
     const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
     const parentRegion = selectedRegion?.kind === "slot"
       ? visualTemplateModel.regions.find((region) => region.id === selectedRegion.parentId)
@@ -13769,6 +16486,25 @@ function App() {
 
     const slotCount = visualTemplateModel.regions.filter((region) => String(region.id || "").startsWith("slot-")).length + 1;
     const id = `slot-${Date.now()}`;
+    const targetContainerLayout = normalizeVisualTemplateLayout(targetContainer.layout);
+    const targetContainerAbsoluteLayout = getVisualTemplateAbsoluteLayout(targetContainer.id);
+    const slotLayout = snapVisualTemplateLayoutToGridContext(
+      {
+        x: 16,
+        y: 16 + Math.min(144, slotCount * 16),
+        width: Math.max(128, Math.min(224, targetContainerLayout.width - 32)),
+        height: 64,
+        zIndex: slotCount + 4,
+      },
+      {
+        x: targetContainerAbsoluteLayout.x,
+        y: targetContainerAbsoluteLayout.y,
+        width: targetContainerLayout.width,
+        height: targetContainerLayout.height,
+      },
+      24,
+      18,
+    );
     const nextSlot = {
       id,
       label: `Slot ${slotCount}`,
@@ -13777,26 +16513,9 @@ function App() {
       role: "custom",
       binding: "bodyParagraphs",
       notes: "Bindable slot inside a visual container.",
-      layout: {
-        x: 16,
-        y: 18 + Math.min(140, slotCount * 18),
-        width: Math.max(120, Math.min(220, normalizeVisualTemplateLayout(targetContainer.layout).width - 32)),
-        height: 56,
-        zIndex: slotCount + 4,
-      },
-      style: {
-        ...visualTemplateStyleDefaults.style,
-        backgroundColor: "#eef5ff",
-        borderColor: "#9bbcf2",
-        borderRadius: 6,
-        padding: 8,
-        minHeight: 48,
-      },
-      textStyle: {
-        ...visualTemplateStyleDefaults.textStyle,
-        color: "#2f5ea7",
-        fontWeight: 750,
-      },
+      layout: slotLayout,
+      style: {},
+      textStyle: {},
     };
 
     applyVisualTemplateModelUpdate((current) => ({
@@ -13816,6 +16535,7 @@ function App() {
           sourceKind,
           sourceName,
           sourcePath,
+          bindingRule,
           ...rest
         } = region;
         return rest;
@@ -13830,6 +16550,21 @@ function App() {
     }, sources);
   }
 
+  function getVisualTemplateCanvasSources(sources = getVisualTemplateSources()) {
+    const sourceMap = new Map<string, any>();
+    const canvasSources = Array.isArray(visualTemplateModel.bindingSources)
+      ? visualTemplateModel.bindingSources
+      : [];
+
+    canvasSources.forEach((candidate) => {
+      const source = findVisualTemplateSourceForDrop(candidate, sources) || candidate;
+      const key = source.id || source.path || source.githubPath || source.href;
+      if (key) sourceMap.set(key, source);
+    });
+
+    return [...sourceMap.values()];
+  }
+
   function getVisualTemplateBoundSources(sources = getVisualTemplateSources()) {
     const sourceMap = new Map<string, any>();
     visualTemplateModel.regions.forEach((region) => {
@@ -13841,9 +16576,37 @@ function App() {
     return [...sourceMap.values()];
   }
 
+  function getVisualTemplateAvailableBindingSources(sources = getVisualTemplateSources()) {
+    const sourceMap = new Map<string, any>();
+    [...getVisualTemplateCanvasSources(sources), ...getVisualTemplateBoundSources(sources)].forEach((source) => {
+      const key = source.id || source.path || source.githubPath || source.href;
+      if (key) sourceMap.set(key, source);
+    });
+    return [...sourceMap.values()];
+  }
+
+  function upsertVisualTemplateCanvasSourceInModel(current, source) {
+    if (!source) return current;
+    const currentSources = Array.isArray(current.bindingSources) ? current.bindingSources : [];
+    const exists = currentSources.some((candidate) => visualTemplateSourceMatchesDrop(candidate, source));
+    if (exists) return current;
+    return {
+      ...current,
+      bindingSources: [...currentSources, source],
+    };
+  }
+
+  function attachVisualTemplateCanvasSource(source) {
+    applyVisualTemplateModelUpdate((current) => upsertVisualTemplateCanvasSourceInModel(current, source));
+    setVisualTemplateSourceId(source.id || null);
+  }
+
   function removeVisualTemplateSource(source) {
     applyVisualTemplateModelUpdate((current) => ({
       ...current,
+      bindingSources: Array.isArray(current.bindingSources)
+        ? current.bindingSources.filter((candidate) => !visualTemplateSourceMatchesDrop(candidate, source))
+        : [],
       regions: current.regions.map((region) => {
         const isRegionSource =
           (source.id && region.sourceFileId === source.id) ||
@@ -13857,6 +16620,7 @@ function App() {
           sourceKind,
           sourceName,
           sourcePath,
+          bindingRule,
           ...rest
         } = region;
         return rest;
@@ -13896,32 +16660,21 @@ function App() {
   }
 
   function canDropVisualTemplateSource(event: React.DragEvent<HTMLElement>) {
-    if (visualTemplateModel.artifactType !== "binding") return false;
     return Array.from(event.dataTransfer.types).some((type) => (
       type === "application/x-xml-editor-project-node" || type === "application/x-dita-project-file"
     ));
   }
 
-  async function bindDroppedFileToVisualRegion(event: React.DragEvent<HTMLElement>, regionId: string) {
-    event.preventDefault();
-    event.stopPropagation();
-    setVisualTemplateDropRegionId(null);
-
-    if (visualTemplateModel.artifactType !== "binding") {
-      appendTerminalMessage("Save the visual template first. DITA files are bound later in a separate template binding document.", {
-        level: "info",
-        source: "Templates",
-        open: false,
-      });
-      return;
-    }
-
+  async function resolveDroppedVisualTemplateSource(event: React.DragEvent<HTMLElement>) {
     const droppedSource = getDroppedVisualTemplateSource(event);
-    if (!droppedSource) return;
+    if (!droppedSource) return null;
 
     let sources = getVisualTemplateSources();
     let source = findVisualTemplateSourceForDrop(droppedSource, sources);
     const matchedNode = droppedSource.id ? findProjectNode(projectTree, droppedSource.id)?.node : null;
+    if (matchedNode?.type === "file" && getProjectFileKind(matchedNode) !== "xml") {
+      return null;
+    }
     if (matchedNode?.type === "file" && (!source || (!fileHistories[matchedNode.id]?.present && !matchedNode.content && matchedNode.githubPath))) {
       const loadedFile = await loadGitHubFileIfNeeded(matchedNode);
       if (loadedFile) {
@@ -13933,9 +16686,218 @@ function App() {
       }
     }
 
+    return source;
+  }
+
+  function isVisualTemplateRegionDropTarget(event: React.DragEvent<HTMLElement>) {
+    const target = event.target as HTMLElement | null;
+    return Boolean(target?.closest?.(".visual-drop-region"));
+  }
+
+  function getVisualTemplateDropTarget(event: React.DragEvent<HTMLElement>) {
+    const target = event.target as HTMLElement | null;
+    const surface = target?.closest?.("[data-visual-template-drop-surface='true'], [data-active-visual-template-drop-surface='true']") as HTMLElement | null;
+    if (!surface) return null;
+    const region = target?.closest?.("[data-visual-template-region-id]") as HTMLElement | null;
+    const paneElement = target?.closest?.("[data-editor-pane-id]") as HTMLElement | null;
+    return {
+      fileId: surface.dataset.visualTemplateDropFileId || paneElement?.dataset.editorPaneFileId || activeFileId,
+      paneId: surface.dataset.visualTemplateDropPaneId || paneElement?.dataset.editorPaneId || activePaneId,
+      regionId: region?.dataset.visualTemplateRegionId || "",
+    };
+  }
+
+  function getVisualTemplateModelForDropTarget(dropTarget) {
+    const fileId = dropTarget?.fileId || activeFileId;
+    const file = getEditorFileForId(fileId);
+    if (!file || file.type !== "file" || getProjectFileKind(file) !== "visual-template") return null;
+
+    const content = fileHistories[fileId]?.present || file.content || "";
+    return hydrateNodeBindingTemplateModel({
+      ...parseVisualTemplateModel(content),
+      artifactType: getVisualTemplateFileArtifactType(file, content),
+      filePath: file.githubPath || getProjectFilePath(projectTree, fileId) || "",
+    });
+  }
+
+  async function bindDroppedFileToVisualTemplateDropTarget(event: React.DragEvent<HTMLElement>, dropTarget) {
+    if (!dropTarget || !canDropVisualTemplateSource(event)) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setEditorFileDropActive(false);
+
+    const targetModel = getVisualTemplateModelForDropTarget(dropTarget);
+    if (!targetModel) return false;
+
+    const source = await resolveDroppedVisualTemplateSource(event);
+    if (!source) {
+      appendTerminalMessage("Only DITA XML topics and maps can be bound to templates for now.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return true;
+    }
+
+    if (targetModel.artifactType === "node-binding-template") {
+      const nextModel = createBindingModelFromNodeBindingTemplate(targetModel, source);
+      openGeneratedTemplateBindingTab(nextModel, source, {
+        paneId: dropTarget.paneId,
+        replaceFileId: dropTarget.fileId,
+      });
+      appendTerminalMessage(`Applied node-binding template to ${source.name}. Review any unresolved slots.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return true;
+    }
+
+    if (targetModel.artifactType !== "binding") {
+      const template = {
+        id: targetModel.template?.id || targetModel.id || `template-${Date.now().toString(36)}`,
+        name: targetModel.name || targetModel.template?.name || "Current template",
+        source: targetModel.template?.source || "current",
+        fileId: dropTarget.fileId || "",
+        filePath: targetModel.filePath || "",
+        regions: targetModel.regions,
+      };
+      const nextModel = createTemplateBindingModelFromTemplate(template, {
+        regionId: dropTarget.regionId,
+        source,
+      });
+      openGeneratedTemplateBindingTab(nextModel, source);
+      appendTerminalMessage(`Created a template binding from ${targetModel.name || "template"} and ${source.name}.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return true;
+    }
+
+    if (dropTarget.fileId && dropTarget.fileId !== activeFileId) {
+      switchToTab(dropTarget.fileId, dropTarget.paneId);
+    }
+    if (dropTarget.regionId) {
+      updateVisualTemplateRegion(dropTarget.regionId, {
+        sourceFileId: source.id,
+        sourcePath: source.path,
+        sourceName: source.name,
+        sourceKind: source.rootName,
+      });
+    }
+    attachVisualTemplateCanvasSource(source);
+    setVisualTemplateSourceId(source.id || null);
+    setActiveSidePanel("templateBindings");
+    return true;
+  }
+
+  async function bindDroppedFileToVisualCanvas(event: React.DragEvent<HTMLElement>) {
+    if (isVisualTemplateRegionDropTarget(event)) return;
+    if (!canDropVisualTemplateSource(event)) return;
+
+    const dropTarget = getVisualTemplateDropTarget(event);
+    if (dropTarget && await bindDroppedFileToVisualTemplateDropTarget(event, { ...dropTarget, regionId: "" })) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setEditorFileDropActive(false);
+
+    const source = await resolveDroppedVisualTemplateSource(event);
+    if (!source) {
+      appendTerminalMessage("Only DITA XML topics and maps can be added as template binding sources for now.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    if (visualTemplateModel.artifactType === "node-binding-template") {
+      const nextModel = createBindingModelFromNodeBindingTemplate(visualTemplateModel, source);
+      openGeneratedTemplateBindingTab(nextModel, source);
+      appendTerminalMessage(`Applied node-binding template to ${source.name}. Review any unresolved slots.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    if (visualTemplateModel.artifactType !== "binding") {
+      const nextModel = createTemplateBindingModelFromTemplate(getCurrentTemplateForBinding(), { source });
+      loadVisualTemplateModel(nextModel);
+      openVisualTemplatesTab(nextModel);
+      setVisualTemplateSourceId(source.id || null);
+      setActiveSidePanel("templateBindings");
+      appendTerminalMessage(`Created a template binding and added ${source.name} as a canvas source.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    attachVisualTemplateCanvasSource(source);
+    setActiveSidePanel("templateBindings");
+  }
+
+  function handleVisualTemplateCanvasDragOver(event: React.DragEvent<HTMLElement>) {
+    if (isVisualTemplateRegionDropTarget(event)) return;
+    if (!canDropVisualTemplateSource(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setEditorFileDropActive(false);
+  }
+
+  async function bindDroppedFileToVisualRegion(event: React.DragEvent<HTMLElement>, regionId: string) {
+    const dropTarget = getVisualTemplateDropTarget(event);
+    if (dropTarget && await bindDroppedFileToVisualTemplateDropTarget(event, { ...dropTarget, regionId })) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setEditorFileDropActive(false);
+    setVisualTemplateDropRegionId(null);
+
+    const source = await resolveDroppedVisualTemplateSource(event);
     if (!source) {
       appendTerminalMessage("Only DITA XML topics and maps can be bound to template binding containers for now.", {
         level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    if (visualTemplateModel.artifactType === "node-binding-template") {
+      const nextModel = createBindingModelFromNodeBindingTemplate(visualTemplateModel, source);
+      openGeneratedTemplateBindingTab(nextModel, source);
+      appendTerminalMessage(`Applied node-binding template to ${source.name}. Review any unresolved slots.`, {
+        level: "info",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    if (visualTemplateModel.artifactType !== "binding") {
+      const nextModel = createTemplateBindingModelFromTemplate(getCurrentTemplateForBinding(), {
+        regionId,
+        source,
+      });
+      loadVisualTemplateModel(nextModel);
+      openVisualTemplatesTab(nextModel);
+      setVisualTemplateSourceId(source.id);
+      setActiveSidePanel("templateBindings");
+      appendTerminalMessage(`Created a template binding and bound ${source.name} to this container.`, {
+        level: "info",
         source: "Templates",
         open: false,
       });
@@ -13948,7 +16910,9 @@ function App() {
       sourceName: source.name,
       sourceKind: source.rootName,
     });
+    attachVisualTemplateCanvasSource(source);
     setVisualTemplateSourceId(source.id);
+    setActiveSidePanel("templateBindings");
   }
 
   function handleVisualTemplateDragOver(event: React.DragEvent<HTMLElement>, regionId: string) {
@@ -13974,6 +16938,179 @@ function App() {
     return normalizeProjectPath(visualTemplateModel.filePath || activeTemplatePath || "");
   }
 
+  function resolveVisualTemplateBackgroundImage(rawHref: unknown) {
+    const href = String(rawHref || "").trim();
+    if (!href || isExternalHref(href) || href.startsWith("data:")) return href;
+
+    const directFile = findProjectFileByPath(projectTree, href);
+    if (directFile?.previewHref) return directFile.previewHref;
+
+    const templatePath = getVisualTemplateExistingPath();
+    if (templatePath) {
+      const resolvedHref = resolveProjectHref(templatePath, href);
+      const resolvedFile = findProjectFileByPath(projectTree, resolvedHref);
+      if (resolvedFile?.previewHref) return resolvedFile.previewHref;
+    }
+
+    return href;
+  }
+
+  function isProjectImageFile(file: any) {
+    if (!file || file.type !== "file") return false;
+    return getProjectFileKind(file) === "image" || isImageHref(file.name || file.githubPath || "");
+  }
+
+  function getVisualTemplateImageAssets() {
+    return collectProjectFiles(projectTree)
+      .filter(({ node }) => isProjectImageFile(node))
+      .map(({ node, path }) => ({
+        id: node.id,
+        name: node.name,
+        path,
+        href: getVisualTemplateImageHrefForPath(path),
+        previewHref: node.previewHref || "",
+        node,
+      }));
+  }
+
+  async function applyVisualTemplateImageAsset(asset) {
+    const region = visualTemplateModel.regions.find((item) => item.id === visualTemplateSelectedRegionId);
+    if (!region) return;
+
+    updateVisualTemplateRegionStyle(region.id, "style", {
+      backgroundImageMode: "image",
+      backgroundImage: asset.href,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+      backgroundPositionX: 50,
+      backgroundPositionY: 50,
+      backgroundRepeat: "no-repeat",
+      backgroundOpacity: 100,
+      backgroundBlendMode: "normal",
+    });
+    setVisualTemplateAssetPickerOpen(false);
+
+    if (asset.node?.githubPath && !asset.node.previewHref) {
+      await loadGitHubFileIfNeeded(asset.node);
+    }
+  }
+
+  async function previewVisualTemplateImageAsset(asset) {
+    if (asset.previewHref || asset.node?.previewHref) {
+      return asset.previewHref || asset.node.previewHref;
+    }
+
+    if (asset.node?.githubPath) {
+      const loadedFile = await loadGitHubFileIfNeeded(asset.node);
+      return loadedFile?.previewHref || "";
+    }
+
+    return "";
+  }
+
+  function getVisualTemplateImageHrefForPath(path: string) {
+    const normalizedPath = normalizeProjectPath(path);
+    const templatePath = getVisualTemplateExistingPath();
+    if (!templatePath || !normalizedPath) return normalizedPath;
+    return getRelativeProjectHref(templatePath, normalizedPath);
+  }
+
+  function getDroppedVisualTemplateImage(event: React.DragEvent<HTMLElement>) {
+    const droppedSource = getDroppedVisualTemplateSource(event);
+    const sourceId = typeof droppedSource?.id === "string" ? droppedSource.id : "";
+    const sourcePath = typeof droppedSource?.path === "string"
+      ? droppedSource.path
+      : typeof droppedSource?.href === "string"
+        ? droppedSource.href
+        : "";
+    const matchedNode = sourceId
+      ? findProjectNode(projectTree, sourceId)?.node
+      : sourcePath
+        ? findProjectFileByPath(projectTree, sourcePath)
+        : null;
+    const droppedPath = matchedNode?.type === "file"
+      ? getProjectFilePath(projectTree, matchedNode.id) || matchedNode.githubPath || sourcePath
+      : sourcePath;
+
+    if (matchedNode?.type === "file" && isProjectImageFile(matchedNode)) {
+      return {
+        file: matchedNode,
+        href: getVisualTemplateImageHrefForPath(droppedPath),
+      };
+    }
+
+    if (droppedPath && isImageHref(droppedPath)) {
+      return {
+        file: null,
+        href: getVisualTemplateImageHrefForPath(droppedPath),
+      };
+    }
+
+    return null;
+  }
+
+  function canDropVisualTemplateImage(event: React.DragEvent<HTMLElement>) {
+    return Boolean(getDroppedVisualTemplateImage(event));
+  }
+
+  function hasProjectFileDrag(event: React.DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).some((type) => (
+      type === "application/x-xml-editor-project-node" ||
+      type === "application/x-dita-project-file" ||
+      type === "text/plain"
+    ));
+  }
+
+  function handleVisualTemplateImageDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!canDropVisualTemplateImage(event) && !hasProjectFileDrag(event)) {
+      if (isEditorInternalDrag(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "none";
+      }
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function handleVisualTemplateImageDrop(
+    event: React.DragEvent<HTMLElement>,
+    applyImageHref: (href: string) => void,
+  ) {
+    if (!canDropVisualTemplateImage(event)) {
+      if (isEditorInternalDrag(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        appendTerminalMessage("Only project image files can be dropped into the image style field.", {
+          level: "warning",
+          source: "Templates",
+          open: false,
+        });
+      }
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const droppedImage = getDroppedVisualTemplateImage(event);
+    if (!droppedImage) {
+      appendTerminalMessage("Only project image files can be dropped into the image style field.", {
+        level: "warning",
+        source: "Templates",
+        open: false,
+      });
+      return;
+    }
+
+    applyImageHref(droppedImage.href);
+
+    if (droppedImage.file?.githubPath && !droppedImage.file.previewHref) {
+      await loadGitHubFileIfNeeded(droppedImage.file);
+    }
+  }
+
   function getVisualTemplateDraftPath(filePathOverride = "") {
     if (filePathOverride) return normalizeProjectPath(filePathOverride);
 
@@ -13981,18 +17118,47 @@ function App() {
     if (existingPath) return existingPath;
 
     const isBinding = visualTemplateModel.artifactType === "binding";
-    const fallbackName = isBinding ? "template-binding" : "visual-template";
+    const isNodeBindingTemplate = visualTemplateModel.artifactType === "node-binding-template";
+    const fallbackName = isBinding ? "template-binding" : isNodeBindingTemplate ? "node-binding-template" : "visual-template";
     const slug = slugifySpecializationName(visualTemplateModel.name || fallbackName) || fallbackName;
     return isBinding
       ? `visual_template_bindings/${slug}.af-binding.json`
+      : isNodeBindingTemplate
+      ? `node_binding_templates/${slug}.af-node-binding.json`
       : `visual_templates/${slug}.af-template.json`;
   }
 
   function getSuggestedVisualTemplateFileName() {
     const isBinding = visualTemplateModel.artifactType === "binding";
-    const fallbackName = isBinding ? "template-binding" : "visual-template";
+    const isNodeBindingTemplate = visualTemplateModel.artifactType === "node-binding-template";
+    const fallbackName = isBinding ? "template-binding" : isNodeBindingTemplate ? "node-binding-template" : "visual-template";
     const slug = slugifyWorkspaceArtifactName(visualTemplateModel.name || fallbackName) || fallbackName;
-    return normalizeFileName(slug, isBinding ? "visual-template-binding" : "visual-template");
+    return normalizeFileName(slug, isBinding ? "visual-template-binding" : isNodeBindingTemplate ? "node-binding-template" : "visual-template");
+  }
+
+  function getVisualTemplateSaveMetadata(model = visualTemplateModel) {
+    if (model.artifactType === "binding") {
+      return {
+        contentFormat: "visual-template-binding",
+        ditaType: "visual-template-binding",
+        label: "template binding document",
+        fallbackFileName: "template-binding.af-binding.json",
+      };
+    }
+    if (model.artifactType === "node-binding-template") {
+      return {
+        contentFormat: "node-binding-template",
+        ditaType: "node-binding-template",
+        label: "node-binding template",
+        fallbackFileName: "node-binding-template.af-node-binding.json",
+      };
+    }
+    return {
+      contentFormat: "visual-template",
+      ditaType: "visual-template",
+      label: "visual template",
+      fallbackFileName: "visual-template.af-template.json",
+    };
   }
 
   async function saveVisualTemplateDraft(filePathOverride = "") {
@@ -14005,11 +17171,17 @@ function App() {
 
     const shouldReplaceUntitledTemplateTab = activeFileId === visualTemplatesTabId;
     const filePath = getVisualTemplateDraftPath(explicitPath);
+    const pathMessage = getProjectPathGuardMessage(filePath);
+    if (pathMessage) {
+      appendTerminalMessage(pathMessage, { level: "warning", source: "Templates", open: true });
+      return;
+    }
     const nextModel = normalizeVisualTemplateModel({
       ...visualTemplateModel,
       filePath,
     });
-    const content = JSON.stringify(nextModel, null, 2);
+    const saveMetadata = getVisualTemplateSaveMetadata(nextModel);
+    const content = JSON.stringify(getPersistableVisualTemplateModel(nextModel), null, 2);
 
     applyVisualTemplateModelUpdate(nextModel, { recordHistory: false });
     setFileHistories((current) => ({
@@ -14041,17 +17213,17 @@ function App() {
           filePath,
           githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
           sourceContentHash: activeFileKind === "visual-template" ? activeFile?.sourceContentHash || "" : "",
-          contentFormat: nextModel.artifactType === "binding" ? "visual-template-binding" : "visual-template",
+          contentFormat: saveMetadata.contentFormat,
           content,
         }),
       });
-      const body = await response.json();
+      const body = await readBackendJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Could not save visual template.");
       }
 
-      const savedFileName = filePath.split("/").pop() || (nextModel.artifactType === "binding" ? "template-binding.af-binding.json" : "visual-template.af-template.json");
+      const savedFileName = filePath.split("/").pop() || saveMetadata.fallbackFileName;
       const savedFileId = activeFileKind === "visual-template" && activeFileId
         ? activeFileId
         : `github-file-${filePath}`;
@@ -14066,7 +17238,7 @@ function App() {
       setProjectTree((currentTree) => upsertProjectTreeFileByPath(currentTree, filePath, {
         id: savedFileId,
         name: savedFileName,
-        ditaType: nextModel.artifactType === "binding" ? "visual-template-binding" : "visual-template",
+        ditaType: saveMetadata.ditaType,
         content,
         githubPath: filePath,
         githubSha: activeFileKind === "visual-template" ? activeFile?.githubSha || "" : "",
@@ -14075,6 +17247,9 @@ function App() {
         draftSavedAt: body.draft?.saved_at || new Date().toISOString(),
         draftDirty: Boolean(body.draft?.dirty),
       }));
+      if (nextModel.artifactType === "template") {
+        refreshOpenNodeBindingTemplatesForSource(savedFileId, filePath, nextModel);
+      }
       if (shouldReplaceUntitledTemplateTab) {
         setTabPanes((panes) => panes.map((pane) => {
           const hasUntitledTemplate = pane.tabs.includes(visualTemplatesTabId);
@@ -14091,7 +17266,7 @@ function App() {
         setActiveFileId(savedFileId);
         setSelectedProjectId(savedFileId);
       }
-      appendTerminalMessage(`Saved ${nextModel.artifactType === "binding" ? "template binding document" : "visual template"} to ${filePath}.`, {
+      appendTerminalMessage(`Saved ${saveMetadata.label} to ${filePath}.`, {
         level: "info",
         source: "Templates",
         open: false,
@@ -14103,6 +17278,54 @@ function App() {
         open: false,
       });
     }
+  }
+
+  function clampVisualNumberValue(value: number, min?: number, max?: number) {
+    if (!Number.isFinite(value)) return 0;
+    let nextValue = value;
+    if (typeof min === "number") nextValue = Math.max(min, nextValue);
+    if (typeof max === "number") nextValue = Math.min(max, nextValue);
+    return nextValue;
+  }
+
+  function getVisualNumberInputValue(value: unknown, fallback = 0) {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? String(numberValue) : String(fallback);
+  }
+
+  function getVisualStepPrecision(step: number) {
+    const stepText = String(step);
+    return stepText.includes(".") ? stepText.split(".")[1].length : 0;
+  }
+
+  function renderVisualNumberStepper({
+    ariaLabel,
+    fallback = 0,
+    max,
+    min,
+    onChange,
+    step = 1,
+    value,
+  }: {
+    ariaLabel: string;
+    fallback?: number;
+    max?: number;
+    min?: number;
+    onChange: (value: number) => void;
+    step?: number;
+    value: unknown;
+  }) {
+    return (
+      <VisualNumberStepper
+        ariaLabel={ariaLabel}
+        fallback={fallback}
+        max={max}
+        min={min}
+        onChange={onChange}
+        step={step}
+        value={value}
+      />
+    );
   }
 
   function renderVisualTemplateLayoutPanel() {
@@ -14148,10 +17371,30 @@ function App() {
               <label>
                 <span>Name</span>
                 <input
+                  ref={(node) => {
+                    visualTemplateRegionNameInputRefs.current[selectedRegion.id] = node;
+                  }}
                   type="text"
-                  value={String(selectedRegion.label || "")}
-                  onChange={(event) => updateVisualTemplateRegionMeta(selectedRegion.id, { label: event.target.value })}
+                  className={visualTemplateRegionNameError?.regionId === selectedRegion.id ? "invalid" : ""}
+                  value={getVisualTemplateRegionNameValue(selectedRegion)}
+                  onFocus={() => startVisualTemplateRegionNameEdit(selectedRegion)}
+                  onChange={(event) => updateVisualTemplateRegionNameDraft(selectedRegion.id, event.target.value)}
+                  onBlur={() => commitVisualTemplateRegionName(selectedRegion.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      if (commitVisualTemplateRegionName(selectedRegion.id)) event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelVisualTemplateRegionNameEdit(selectedRegion.id);
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
+                {visualTemplateRegionNameError?.regionId === selectedRegion.id && (
+                  <small className="visual-template-field-error">{visualTemplateRegionNameError.message}</small>
+                )}
               </label>
               <label>
                 <span>Role</span>
@@ -14189,54 +17432,54 @@ function App() {
               <div className="visual-style-grid-two">
                 <label>
                   <span>X</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max={visualTemplatePageSize.width}
-                    value={Math.round(regionLayout.x)}
-                    onChange={(event) => updateLayout({ x: Number(event.target.value) })}
-                  />
+                  {renderVisualNumberStepper({
+                    ariaLabel: "X position",
+                    min: 0,
+                    max: visualTemplatePageSize.width,
+                    value: Math.round(regionLayout.x),
+                    onChange: (value) => updateLayout({ x: value }),
+                  })}
                 </label>
                 <label>
                   <span>Y</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max={visualTemplatePageSize.height}
-                    value={Math.round(regionLayout.y)}
-                    onChange={(event) => updateLayout({ y: Number(event.target.value) })}
-                  />
+                  {renderVisualNumberStepper({
+                    ariaLabel: "Y position",
+                    min: 0,
+                    max: visualTemplatePageSize.height,
+                    value: Math.round(regionLayout.y),
+                    onChange: (value) => updateLayout({ y: value }),
+                  })}
                 </label>
                 <label>
                   <span>W</span>
-                  <input
-                    type="number"
-                    min="40"
-                    max={visualTemplatePageSize.width}
-                    value={Math.round(regionLayout.width)}
-                    onChange={(event) => updateLayout({ width: Number(event.target.value) })}
-                  />
+                  {renderVisualNumberStepper({
+                    ariaLabel: "Width",
+                    min: 40,
+                    max: visualTemplatePageSize.width,
+                    value: Math.round(regionLayout.width),
+                    onChange: (value) => updateLayout({ width: value }),
+                  })}
                 </label>
                 <label>
                   <span>H</span>
-                  <input
-                    type="number"
-                    min="24"
-                    max={visualTemplatePageSize.height}
-                    value={Math.round(regionLayout.height)}
-                    onChange={(event) => updateLayout({ height: Number(event.target.value) })}
-                  />
+                  {renderVisualNumberStepper({
+                    ariaLabel: "Height",
+                    min: 24,
+                    max: visualTemplatePageSize.height,
+                    value: Math.round(regionLayout.height),
+                    onChange: (value) => updateLayout({ height: value }),
+                  })}
                 </label>
               </div>
               <label>
                 <span>Layer</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={Math.round(regionLayout.zIndex)}
-                  onChange={(event) => updateLayout({ zIndex: Number(event.target.value) })}
-                />
+                {renderVisualNumberStepper({
+                  ariaLabel: "Layer",
+                  min: 1,
+                  max: 20,
+                  value: Math.round(regionLayout.zIndex),
+                  onChange: (value) => updateLayout({ zIndex: value }),
+                })}
               </label>
             </section>
             <section className="visual-style-section">
@@ -14281,13 +17524,13 @@ function App() {
               </label>
               <label>
                 <span>Threshold</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="16"
-                  value={gridSettings.snapThreshold}
-                  onChange={(event) => updateVisualTemplateGridSettings({ snapThreshold: Number(event.target.value) })}
-                />
+                {renderVisualNumberStepper({
+                  ariaLabel: "Snap threshold",
+                  min: 1,
+                  max: 16,
+                  value: gridSettings.snapThreshold,
+                  onChange: (value) => updateVisualTemplateGridSettings({ snapThreshold: value }),
+                })}
               </label>
               <label>
                 <span>Columns</span>
@@ -14342,7 +17585,7 @@ function App() {
               <div className="visual-style-actions">
                 <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 1 })}>100%</button>
                 <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 0.85 })}>Fit width</button>
-                <button type="button" onClick={() => updateVisualTemplateGridSettings({ zoom: 0.75 })}>Fit screen</button>
+                <button type="button" onClick={() => fitVisualTemplateToScreen()}>Fit screen</button>
                 <button
                   type="button"
                   className={visualTemplateMeasureMode ? "active" : ""}
@@ -14386,8 +17629,135 @@ function App() {
 
   function renderVisualTemplateStylePanel() {
     const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
-    const regionStyle = normalizeVisualTemplateStyle(selectedRegion?.style, visualTemplateStyleDefaults.style);
-    const textStyle = normalizeVisualTemplateStyle(selectedRegion?.textStyle, visualTemplateStyleDefaults.textStyle);
+    const availableStyleClasses = getStyleClassesForRegionKind(selectedRegion?.kind, designSystem.styleClasses);
+    const selectedStyleClass = selectedRegion?.styleClassId
+      ? availableStyleClasses.find((styleClass) => styleClass.key === selectedRegion.styleClassId) || null
+      : null;
+    const selectedClassBoxStyle = selectedStyleClass ? resolveStyleTokens(selectedStyleClass.style, designTokensByKey) : {};
+    const selectedClassTextStyle = selectedStyleClass ? resolveStyleTokens(selectedStyleClass.textStyle, designTokensByKey) : {};
+    const regionStyle = getResolvedVisualTemplateStyle(selectedRegion?.style, visualTemplateStyleDefaults.style, selectedClassBoxStyle);
+    const textStyle = getResolvedVisualTemplateStyle(selectedRegion?.textStyle, visualTemplateStyleDefaults.textStyle, selectedClassTextStyle);
+    const localBoxStyle = selectedRegion?.style || {};
+    const localTextStyle = selectedRegion?.textStyle || {};
+
+    const formatStylePreviewLabel = (property: string) => property
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[-_.]/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+    const hasStyleValue = (value: unknown) => value !== undefined && value !== null && value !== "";
+    const formatStylePreviewValue = (value: unknown) => typeof value === "number" ? `${value}px` : String(value);
+    const formatSummaryValue = (value: unknown, fallback = "default") => hasStyleValue(value) ? String(value) : fallback;
+    const getLocalStyleEntries = (
+      style: Record<string, any>,
+      inheritedStyle: Record<string, any>,
+      defaults: Record<string, any>,
+    ) => (
+      Object.entries(style).filter(([property, value]) => (
+        hasStyleValue(value) &&
+        (!selectedStyleClass || (
+          !isSameVisualTemplateStyleValue(value, defaults[property]) &&
+          String(value) !== String(inheritedStyle[property] ?? "")
+        ))
+      ))
+    );
+    const localBoxEntries = getLocalStyleEntries(localBoxStyle, selectedClassBoxStyle, visualTemplateStyleDefaults.style);
+    const localTextEntries = getLocalStyleEntries(localTextStyle, selectedClassTextStyle, visualTemplateStyleDefaults.textStyle);
+    const localStyleValueCount = localBoxEntries.length + localTextEntries.length;
+    const rawLocalStyleValueCount = Object.values(localBoxStyle).filter(hasStyleValue).length +
+      Object.values(localTextStyle).filter(hasStyleValue).length;
+    const localOverrideCount = selectedStyleClass ? localStyleValueCount : 0;
+    const isCustomBoxSetting = (...properties: string[]) => (
+      Boolean(selectedStyleClass) && properties.some((property) => (
+        localBoxEntries.some(([localProperty]) => localProperty === property)
+      ))
+    );
+    const isCustomTextSetting = (...properties: string[]) => (
+      Boolean(selectedStyleClass) && properties.some((property) => (
+        localTextEntries.some(([localProperty]) => localProperty === property)
+      ))
+    );
+    const getCustomControlClass = (custom: boolean) => (custom ? "visual-style-control-custom" : undefined);
+    const backgroundMode = regionStyle.backgroundImageMode === "image" && regionStyle.backgroundImage
+      ? `image, ${formatSummaryValue(regionStyle.backgroundSize, "cover")}, ${formatSummaryValue(regionStyle.backgroundPosition, "center")}, ${formatSummaryValue(regionStyle.backgroundRepeat, "no-repeat")}`
+      : regionStyle.fillMode === "gradient"
+      ? `gradient ${formatSummaryValue(regionStyle.gradientFrom, "#fff")} -> ${formatSummaryValue(regionStyle.gradientTo, "#eef5ff")}`
+      : `solid ${formatSummaryValue(regionStyle.backgroundColor, "#ffffff")}`;
+    const shadowSummary = regionStyle.shadowPreset && regionStyle.shadowPreset !== "none"
+      ? `${regionStyle.shadowPreset}${hasStyleValue(regionStyle.shadowOpacity) ? `, ${regionStyle.shadowOpacity}%` : ""}`
+      : "none";
+    const appliedStyleSummary = [
+      {
+        label: "Background",
+        value: backgroundMode,
+      },
+      {
+        label: "Border",
+        value: `${formatSummaryValue(regionStyle.borderWidth, "0px")} ${formatSummaryValue(regionStyle.borderStyle, "solid")} ${formatSummaryValue(regionStyle.borderColor, "#b9c9df")}, radius ${formatSummaryValue(regionStyle.borderRadius, "0px")}`,
+      },
+      {
+        label: "Spacing",
+        value: `padding ${formatSummaryValue(regionStyle.padding, "0px")}, min height ${formatSummaryValue(regionStyle.minHeight, "auto")}`,
+      },
+      {
+        label: "Text",
+        value: `${formatSummaryValue(textStyle.fontSize, "13px")} ${formatSummaryValue(textStyle.fontWeight, "500")} ${formatSummaryValue(textStyle.color, "#172033")}, ${formatSummaryValue(textStyle.textAlign, "left")}`,
+      },
+      {
+        label: "Effects",
+        value: `shadow ${shadowSummary}${regionStyle.animationName && regionStyle.animationName !== "none" ? `, ${regionStyle.animationName}` : ""}`,
+      },
+    ];
+    const styleSourceLabel = selectedStyleClass
+      ? selectedStyleClass.displayName
+      : "Custom style";
+    const styleSourceStatus = selectedStyleClass
+      ? localOverrideCount
+        ? `${localOverrideCount} custom setting${localOverrideCount === 1 ? "" : "s"} on this object`
+        : "Using the selected class"
+      : localStyleValueCount
+      ? `${localStyleValueCount} custom setting${localStyleValueCount === 1 ? "" : "s"}`
+      : "Using the default style";
+
+    const renderStyleClassPreview = (title: string, style: Record<string, any>) => {
+      const entries = Object.entries(style).filter(([, value]) => value !== undefined && value !== null && value !== "");
+      if (!entries.length) return null;
+      return (
+        <div className="visual-style-class-preview-group">
+          <span>{title}</span>
+          <div className="visual-style-class-preview-list">
+            {entries.map(([property, value]) => {
+              const displayValue = formatStylePreviewValue(value);
+              const isColor = typeof value === "string" && /^(#|rgb|hsl)/i.test(value);
+              return (
+                <span className="visual-style-class-chip" key={property}>
+                  {isColor && <i aria-hidden="true" style={{ background: String(value) }} />}
+                  <b>{formatStylePreviewLabel(property)}</b>
+                  <em>{displayValue}</em>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    const renderLocalStyleEntries = (title: string, entries: Array<[string, any]>) => {
+      if (!entries.length) return null;
+      return (
+        <div className="visual-style-class-preview-group">
+          <span>{title}</span>
+          <div className="visual-style-class-preview-list">
+            {entries.map(([property, value]) => (
+              <span className="visual-style-class-chip override" key={property}>
+                <b>{formatStylePreviewLabel(property)}</b>
+                <em>{formatStylePreviewValue(value)}</em>
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    };
 
     const updateContainerStyle = (updates: Record<string, any>) => {
       if (!selectedRegion) return;
@@ -14397,6 +17767,261 @@ function App() {
       if (!selectedRegion) return;
       updateVisualTemplateRegionStyle(selectedRegion.id, "textStyle", updates);
     };
+    const resetCustomSettings = () => {
+      if (!selectedRegion) return;
+      updateVisualTemplateRegionMeta(selectedRegion.id, {
+        style: {},
+        textStyle: {},
+      });
+    };
+    const resetBoxSettings = (properties: string[]) => {
+      if (!selectedRegion) return;
+      removeVisualTemplateRegionStyleProperties(selectedRegion.id, "style", properties);
+    };
+    const resetTextSettings = (properties: string[]) => {
+      if (!selectedRegion) return;
+      removeVisualTemplateRegionStyleProperties(selectedRegion.id, "textStyle", properties);
+    };
+    const renderInheritedResetButton = (
+      customSetting: boolean,
+      label: string,
+      onReset: () => void,
+    ) => (
+      customSetting ? (
+        <button
+          type="button"
+          className="visual-style-inherit-button"
+          title={`Use inherited ${label.toLowerCase()}`}
+          aria-label={`Use inherited ${label}`}
+          onClick={onReset}
+        >
+          Reset
+        </button>
+      ) : null
+    );
+
+    type VisualStyleMeasureControlOptions = {
+      defaultUnit?: string;
+      max?: number;
+      min?: number;
+      property: string;
+      step?: number;
+      units: string[];
+      value: unknown;
+      customSetting?: boolean;
+      onReset?: () => void;
+      onChange: (updates: Record<string, any>) => void;
+    };
+    const parseVisualStyleMeasureValue = (
+      value: unknown,
+      defaultUnit = "px",
+    ) => {
+      const text = String(value ?? "").trim();
+      const match = text.match(/^(-?\d+(?:\.\d+)?)([a-z%]*)$/i);
+      if (!match) {
+        return {
+          amount: Number.isFinite(Number(value)) ? String(value) : "",
+          unit: defaultUnit,
+        };
+      }
+      return {
+        amount: match[1],
+        unit: match[2] || defaultUnit,
+      };
+    };
+    const getVisualStyleMeasureStep = (unit: string, fallbackStep: number) => {
+      if (unit === "em" || unit === "rem") return 0.25;
+      if (unit === "s") return 0.1;
+      if (unit === "ms") return 50;
+      if (unit === "px" || unit === "pt" || unit === "%" || unit === "vh" || unit === "vw") return 1;
+      return fallbackStep;
+    };
+    const renderVisualStyleMeasureControl = (
+      label: string,
+      {
+        defaultUnit,
+        max,
+        min,
+        property,
+        step = 1,
+        units,
+        value,
+        customSetting = false,
+        onReset,
+        onChange,
+      }: VisualStyleMeasureControlOptions,
+    ) => {
+      const fallbackUnit = defaultUnit || units[0] || "px";
+      const parsedValue = parseVisualStyleMeasureValue(value, fallbackUnit);
+      const selectedUnit = units.includes(parsedValue.unit) ? parsedValue.unit : fallbackUnit;
+      const selectedStep = getVisualStyleMeasureStep(selectedUnit, step);
+      const commitValue = (amount: string, unit: string) => {
+        if (amount === "" || amount === "-" || amount === "." || amount === "-.") return;
+        const nextAmount = Number(amount);
+        if (!Number.isFinite(nextAmount)) return;
+        onChange({ [property]: `${amount}${unit}` });
+      };
+      return (
+        <div className="visual-style-control-row">
+          <label className={`visual-style-measure-label${customSetting ? " visual-style-control-custom" : ""}`}>
+            <span>{label}</span>
+            <div className="visual-style-measure-control">
+              {renderVisualNumberStepper({
+                ariaLabel: label,
+                fallback: 0,
+                min,
+                max,
+                step: selectedStep,
+                value: parsedValue.amount,
+                onChange: (nextAmount) => commitValue(String(nextAmount), selectedUnit),
+              })}
+              <select
+                value={selectedUnit}
+                onChange={(event) => commitValue(parsedValue.amount, event.target.value)}
+                aria-label={`${label} unit`}
+              >
+                {units.map((unit) => (
+                  <option key={unit} value={unit}>{unit}</option>
+                ))}
+              </select>
+            </div>
+          </label>
+          {renderInheritedResetButton(customSetting, label, onReset || (() => resetBoxSettings([property])))}
+        </div>
+      );
+    };
+    const closeVisualColorPicker = () => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    };
+    const renderVisualColorControl = (
+      label: string,
+      {
+        customSetting = false,
+        fallback,
+        presets = ["transparent", "#ffffff", "#f8fafc", "#e2e8f0", "#172033", "#5758c8", "#2f6ce5", "#2f9d5c", "#f0a93f", "#dc2626"],
+        value,
+        onReset,
+        onChange,
+      }: {
+        customSetting?: boolean;
+        fallback: string;
+        presets?: string[];
+        value: unknown;
+        onReset?: () => void;
+        onChange: (value: string) => void;
+      },
+    ) => {
+      const rawValue = String(value ?? "").trim();
+      const isUnsetColor = !rawValue || rawValue === "transparent" || rawValue === "none";
+      const colorValue = /^#[0-9a-f]{6}$/i.test(rawValue) ? rawValue : fallback;
+      return (
+        <div className="visual-style-control-row">
+          <label className={getCustomControlClass(customSetting)}>
+            <span>{label}</span>
+            <div className="visual-style-color-control">
+              <input
+                type="color"
+                value={colorValue}
+                title={isUnsetColor ? `${label}: no color set` : `${label}: ${rawValue}`}
+                aria-label={isUnsetColor ? `${label}: no color set` : `${label}: ${rawValue}`}
+                onChange={(event) => onChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+              <button type="button" className="visual-style-color-done" onClick={closeVisualColorPicker}>Done</button>
+              <div className="visual-style-color-presets" aria-label={`${label} preset colors`}>
+                {presets.map((preset) => {
+                  const isTransparentPreset = preset === "transparent" || preset === "none";
+                  const selectedPreset = isTransparentPreset ? isUnsetColor : rawValue.toLowerCase() === preset.toLowerCase();
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`${isTransparentPreset ? "transparent" : ""}${selectedPreset ? " selected" : ""}`}
+                      style={isTransparentPreset ? undefined : { backgroundColor: preset }}
+                      title={isTransparentPreset ? "None" : preset}
+                      aria-label={isTransparentPreset ? `Set ${label} to none` : `Set ${label} to ${preset}`}
+                      aria-pressed={selectedPreset}
+                      onClick={() => onChange(isTransparentPreset ? "transparent" : preset)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </label>
+          {renderInheritedResetButton(customSetting, label, onReset || (() => undefined))}
+        </div>
+      );
+    };
+    const renderVisualSelectControl = (
+      label: string,
+      {
+        customSetting = false,
+        onReset,
+        children,
+        value,
+        onChange,
+      }: {
+        customSetting?: boolean;
+        onReset?: () => void;
+        children: React.ReactNode;
+        value: string;
+        onChange: (value: string) => void;
+      },
+    ) => (
+      <div className="visual-style-control-row">
+        <label className={getCustomControlClass(customSetting)}>
+          <span>{label}</span>
+          <select value={value} onChange={(event) => onChange(event.target.value)}>
+            {children}
+          </select>
+        </label>
+        {renderInheritedResetButton(customSetting, label, onReset || (() => undefined))}
+      </div>
+    );
+    const renderVisualStepperControl = (
+      label: string,
+      {
+        customSetting = false,
+        fallback,
+        max,
+        min,
+        onReset,
+        step,
+        value,
+        onChange,
+      }: {
+        customSetting?: boolean;
+        fallback: number;
+        max?: number;
+        min?: number;
+        onReset?: () => void;
+        step?: number;
+        value: unknown;
+        onChange: (value: number) => void;
+      },
+    ) => (
+      <div className="visual-style-control-row">
+        <label className={getCustomControlClass(customSetting)}>
+          <span>{label}</span>
+          {renderVisualNumberStepper({
+            ariaLabel: label,
+            fallback,
+            max,
+            min,
+            step,
+            value,
+            onChange,
+          })}
+        </label>
+        {renderInheritedResetButton(customSetting, label, onReset || (() => undefined))}
+      </div>
+    );
 
     return (
       <aside
@@ -14418,365 +18043,694 @@ function App() {
         </div>
         {selectedRegion ? (
           <div className="visual-template-side-content visual-style-panel">
-            <section className="visual-style-section">
+            <nav className="visual-style-jump-nav" aria-label="Style panel sections">
+              <a href="#visual-style-source">Style</a>
+              <a href="#visual-style-fill">Fill</a>
+              <a href="#visual-style-border">Border</a>
+              <a href="#visual-style-spacing">Spacing</a>
+              <a href="#visual-style-text">Text</a>
+            </nav>
+            <section id="visual-style-source" className="visual-style-section visual-style-source-section">
+              <header>
+                <strong>Style</strong>
+                <small>Class or custom settings</small>
+              </header>
+              <label className="visual-style-wide-control">
+                <span>Class</span>
+                <select
+                  value={String(selectedRegion.styleClassId || "")}
+                  onChange={(event) => {
+                    const nextStyleClassId = event.target.value;
+                    updateVisualTemplateRegionMeta(selectedRegion.id, {
+                      styleClassId: nextStyleClassId,
+                      style: nextStyleClassId
+                        ? {}
+                        : pruneVisualTemplateDefaultStyleValues(selectedRegion.style, visualTemplateStyleDefaults.style),
+                      textStyle: nextStyleClassId
+                        ? {}
+                        : pruneVisualTemplateDefaultStyleValues(selectedRegion.textStyle, visualTemplateStyleDefaults.textStyle),
+                    });
+                  }}
+                >
+                  <option value="">Custom style</option>
+                  {availableStyleClasses.map((styleClass) => (
+                    <option key={styleClass.key} value={styleClass.key}>{styleClass.displayName}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="visual-style-source-card">
+                <div>
+                  <strong>{styleSourceLabel}</strong>
+                  <small>{styleSourceStatus}</small>
+                </div>
+                <span className={`visual-style-class-state${selectedStyleClass ? "" : " direct-state"}${localOverrideCount ? " override-state" : ""}`}>
+                  {selectedStyleClass ? "Class" : "Custom"}
+                </span>
+              </div>
+              <div className="visual-style-actions visual-style-reset-actions">
+                <button
+                  type="button"
+                  disabled={rawLocalStyleValueCount === 0}
+                  title={rawLocalStyleValueCount === 0 ? "No custom settings to reset" : "Remove custom settings from this object"}
+                  onClick={resetCustomSettings}
+                >
+                  Reset custom settings
+                </button>
+              </div>
+              {selectedStyleClass && (
+                <details className="visual-style-details">
+                  <summary>Class details</summary>
+                  <div className="visual-style-class-preview compact">
+                    <div className="visual-style-class-preview-heading">
+                      <div className="visual-style-class-preview-title">
+                        <strong>{selectedStyleClass.displayName}</strong>
+                        <code>{selectedStyleClass.key}</code>
+                      </div>
+                    </div>
+                    {selectedStyleClass.description && <p>{selectedStyleClass.description}</p>}
+                    {renderStyleClassPreview("Box style", selectedClassBoxStyle)}
+                    {renderStyleClassPreview("Text style", selectedClassTextStyle)}
+                  </div>
+                </details>
+              )}
+              {(localOverrideCount || (!selectedStyleClass && localStyleValueCount > 0)) && (
+                <details className="visual-style-details">
+                  <summary>{selectedStyleClass ? "Custom settings on this object" : "Custom settings"}</summary>
+                  <div className="visual-style-local-overrides">
+                    {selectedStyleClass ? (
+                      <div className="visual-style-class-state override-state">Custom</div>
+                    ) : (
+                      <div className="visual-style-class-state direct-state">Custom</div>
+                    )}
+                    {renderLocalStyleEntries("Box settings", localBoxEntries)}
+                    {renderLocalStyleEntries("Text settings", localTextEntries)}
+                  </div>
+                </details>
+              )}
+              <details className="visual-style-details">
+                <summary>Final style being applied</summary>
+                <div className="visual-style-applied-summary">
+                  {appliedStyleSummary.map((item) => (
+                    <div key={item.label}>
+                      <span>{item.label}</span>
+                      <strong>{item.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </details>
+              {designSystemStatus === "error" && (
+                <small className="visual-style-status">Using local fallback styles until the team design system loads.</small>
+              )}
+            </section>
+            <section id="visual-style-fill" className="visual-style-section">
               <header>
                 <strong>Fill</strong>
                 <small>Container surface</small>
               </header>
-              <label>
-                <span>Type</span>
-                <select
-                  value={String(regionStyle.fillMode || "solid")}
-                  onChange={(event) => updateContainerStyle({ fillMode: event.target.value })}
-                >
-                  <option value="solid">Solid</option>
-                  <option value="gradient">Gradient</option>
-                </select>
-              </label>
-              <label>
-                <span>Background</span>
-                <input
-                  type="color"
-                  value={regionStyle.backgroundColor || "#ffffff"}
-                  onChange={(event) => updateContainerStyle({ backgroundColor: event.target.value })}
-                />
-              </label>
+              {renderVisualSelectControl("Type", {
+                value: String(regionStyle.fillMode || "solid"),
+                customSetting: isCustomBoxSetting("fillMode"),
+                onReset: () => resetBoxSettings(["fillMode"]),
+                onChange: (value) => updateContainerStyle({
+                    fillMode: value,
+                    ...(value === "solid" ? { backgroundImageMode: "none" } : {}),
+                  }),
+                children: (
+                  <>
+                    <option value="solid">Solid</option>
+                    <option value="gradient">Gradient</option>
+                  </>
+                ),
+              })}
+              {renderVisualColorControl("Background", {
+                value: regionStyle.backgroundColor,
+                fallback: "#ffffff",
+                customSetting: isCustomBoxSetting("backgroundColor", "fillMode", "backgroundImageMode"),
+                onReset: () => resetBoxSettings(["backgroundColor", "fillMode", "backgroundImageMode"]),
+                onChange: (value) => updateContainerStyle({
+                    fillMode: "solid",
+                    backgroundColor: value,
+                    backgroundImageMode: "none",
+                  }),
+              })}
               {regionStyle.fillMode === "gradient" && (
                 <>
-                  <label>
-                    <span>From</span>
-                    <input
-                      type="color"
-                      value={regionStyle.gradientFrom || regionStyle.backgroundColor || "#ffffff"}
-                      onChange={(event) => updateContainerStyle({ gradientFrom: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span>To</span>
-                    <input
-                      type="color"
-                      value={regionStyle.gradientTo || "#eef5ff"}
-                      onChange={(event) => updateContainerStyle({ gradientTo: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span>Angle</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="360"
-                      value={Number(regionStyle.gradientAngle ?? 135)}
-                      onChange={(event) => updateContainerStyle({ gradientAngle: Number(event.target.value) })}
-                    />
-                  </label>
+                  {renderVisualColorControl("From", {
+                    value: regionStyle.gradientFrom || regionStyle.backgroundColor,
+                    fallback: "#ffffff",
+                    customSetting: isCustomBoxSetting("gradientFrom"),
+                    onReset: () => resetBoxSettings(["gradientFrom"]),
+                    onChange: (value) => updateContainerStyle({ gradientFrom: value }),
+                  })}
+                  {renderVisualColorControl("To", {
+                    value: regionStyle.gradientTo,
+                    fallback: "#eef5ff",
+                    customSetting: isCustomBoxSetting("gradientTo"),
+                    onReset: () => resetBoxSettings(["gradientTo"]),
+                    onChange: (value) => updateContainerStyle({ gradientTo: value }),
+                  })}
+                  {renderVisualStepperControl("Angle", {
+                    fallback: 135,
+                    max: 360,
+                    min: 0,
+                    value: regionStyle.gradientAngle,
+                    customSetting: isCustomBoxSetting("gradientAngle"),
+                    onReset: () => resetBoxSettings(["gradientAngle"]),
+                    onChange: (value) => updateContainerStyle({ gradientAngle: value }),
+                  })}
                 </>
               )}
               <div className="visual-style-divider" />
-              <label>
-                <span>Image</span>
-                <select
-                  value={String(regionStyle.backgroundImageMode || "none")}
-                  onChange={(event) => updateContainerStyle({ backgroundImageMode: event.target.value })}
-                >
-                  <option value="none">None</option>
-                  <option value="image">Use image</option>
-                </select>
-              </label>
+              <div
+                className="visual-style-image-drop-target"
+                onDragOver={handleVisualTemplateImageDragOver}
+                onDrop={(event) => {
+                  void handleVisualTemplateImageDrop(event, (href) => updateContainerStyle({
+                    backgroundImageMode: "image",
+                    backgroundImage: href,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    backgroundPositionX: 50,
+                    backgroundPositionY: 50,
+                    backgroundRepeat: "no-repeat",
+                    backgroundOpacity: 100,
+                    backgroundBlendMode: "normal",
+                  }));
+                }}
+              >
+                {renderVisualSelectControl("Image", {
+                  value: String(regionStyle.backgroundImageMode || "none"),
+                  customSetting: isCustomBoxSetting("backgroundImageMode"),
+                  onReset: () => resetBoxSettings(["backgroundImageMode", "backgroundImage"]),
+                  onChange: (value) => updateContainerStyle({ backgroundImageMode: value }),
+                  children: (
+                    <>
+                      <option value="none">None</option>
+                      <option value="image">Use image</option>
+                    </>
+                  ),
+                })}
+              </div>
               {regionStyle.backgroundImageMode === "image" && (
                 <>
-                  <label className="visual-style-wide-control">
+                  <label className={`visual-style-wide-control visual-style-image-drop-target ${getCustomControlClass(isCustomBoxSetting("backgroundImage")) || ""}`}>
                     <span>Path or URL</span>
-                    <input
-                      type="text"
-                      placeholder="images/hero.png or https://..."
-                      value={String(regionStyle.backgroundImage || "")}
-                      onChange={(event) => updateContainerStyle({ backgroundImage: event.target.value })}
-                    />
+                    <div className="visual-style-image-source-control">
+                      <input
+                        className="visual-style-image-drop-target"
+                        type="text"
+                        placeholder="images/hero.png or https://..."
+                        value={String(regionStyle.backgroundImage || "")}
+                        onChange={(event) => updateContainerStyle({ backgroundImage: event.target.value })}
+                        onDragOver={handleVisualTemplateImageDragOver}
+                        onDrop={(event) => {
+                          void handleVisualTemplateImageDrop(event, (href) => updateContainerStyle({
+                            backgroundImageMode: "image",
+                            backgroundImage: href,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                            backgroundPositionX: 50,
+                            backgroundPositionY: 50,
+                            backgroundRepeat: "no-repeat",
+                            backgroundOpacity: 100,
+                            backgroundBlendMode: "normal",
+                          }));
+                        }}
+                      />
+                      <button type="button" onClick={() => setVisualTemplateAssetPickerOpen(true)}>
+                        Pick
+                      </button>
+                    </div>
                   </label>
-                  <label>
-                    <span>Size</span>
-                    <select
-                      value={String(regionStyle.backgroundSize || "cover")}
-                      onChange={(event) => updateContainerStyle({ backgroundSize: event.target.value })}
+                  <div className="visual-style-actions visual-style-wide-control">
+                    <button
+                      type="button"
+                      onClick={() => updateContainerStyle({
+                        backgroundImageMode: "none",
+                        backgroundImage: "",
+                        backgroundOverlayOpacity: 0,
+                      })}
                     >
-                      <option value="cover">Cover</option>
-                      <option value="contain">Contain</option>
-                      <option value="auto">Actual size</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Position</span>
-                    <select
-                      value={String(regionStyle.backgroundPosition || "center")}
-                      onChange={(event) => updateContainerStyle({ backgroundPosition: event.target.value })}
-                    >
-                      <option value="center">Center</option>
-                      <option value="top">Top</option>
-                      <option value="bottom">Bottom</option>
-                      <option value="left">Left</option>
-                      <option value="right">Right</option>
-                      <option value="left top">Left top</option>
-                      <option value="right top">Right top</option>
-                      <option value="left bottom">Left bottom</option>
-                      <option value="right bottom">Right bottom</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Repeat</span>
-                    <select
-                      value={String(regionStyle.backgroundRepeat || "no-repeat")}
-                      onChange={(event) => updateContainerStyle({ backgroundRepeat: event.target.value })}
-                    >
-                      <option value="no-repeat">No repeat</option>
-                      <option value="repeat">Repeat</option>
-                      <option value="repeat-x">Repeat X</option>
-                      <option value="repeat-y">Repeat Y</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Overlay</span>
-                    <input
-                      type="color"
-                      value={regionStyle.backgroundOverlayColor || "#000000"}
-                      onChange={(event) => updateContainerStyle({ backgroundOverlayColor: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span>Overlay %</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="90"
-                      value={Number(regionStyle.backgroundOverlayOpacity ?? 0)}
-                      onChange={(event) => updateContainerStyle({ backgroundOverlayOpacity: Number(event.target.value) })}
-                    />
-                  </label>
+                      Clear image
+                    </button>
+                  </div>
+                  <details className="visual-style-details" open>
+                    <summary>Image layout</summary>
+                    <div className="visual-style-detail-controls">
+                      {renderVisualSelectControl("Size", {
+                        value: String(regionStyle.backgroundSize || "cover"),
+                        customSetting: isCustomBoxSetting("backgroundSize", "backgroundSizeCustom"),
+                        onReset: () => resetBoxSettings(["backgroundSize", "backgroundSizeCustom"]),
+                        onChange: (value) => updateContainerStyle({
+                            backgroundSize: value,
+                            ...(value === "custom" && !regionStyle.backgroundSizeCustom
+                              ? { backgroundSizeCustom: "auto" }
+                              : {}),
+                          }),
+                        children: (
+                          <>
+                            <option value="cover">Cover</option>
+                            <option value="contain">Contain</option>
+                            <option value="auto">Actual size</option>
+                            <option value="100% auto">Full width</option>
+                            <option value="auto 100%">Full height</option>
+                            <option value="custom">Custom</option>
+                          </>
+                        ),
+                      })}
+                      {regionStyle.backgroundSize === "custom" && (
+                        <label className={getCustomControlClass(isCustomBoxSetting("backgroundSizeCustom"))}>
+                          <span>Custom size</span>
+                          <input
+                            type="text"
+                            placeholder="320px auto or 50%"
+                            value={String(regionStyle.backgroundSizeCustom || "")}
+                            onChange={(event) => updateContainerStyle({
+                              backgroundSizeCustom: event.target.value,
+                              backgroundSize: "custom",
+                            })}
+                          />
+                        </label>
+                      )}
+                      {renderVisualSelectControl("Position", {
+                        value: String(regionStyle.backgroundPosition || "center"),
+                        customSetting: isCustomBoxSetting("backgroundPosition", "backgroundPositionX", "backgroundPositionY"),
+                        onReset: () => resetBoxSettings(["backgroundPosition", "backgroundPositionX", "backgroundPositionY"]),
+                        onChange: (value) => updateContainerStyle({ backgroundPosition: value }),
+                        children: (
+                          <>
+                            <option value="center">Center</option>
+                            <option value="top">Top</option>
+                            <option value="bottom">Bottom</option>
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                            <option value="left top">Left top</option>
+                            <option value="right top">Right top</option>
+                            <option value="left bottom">Left bottom</option>
+                            <option value="right bottom">Right bottom</option>
+                            <option value="custom">Custom focal point</option>
+                          </>
+                        ),
+                      })}
+                      {regionStyle.backgroundPosition === "custom" && (
+                        <>
+                          {renderVisualStepperControl("Focal X %", {
+                            fallback: 50,
+                            max: 100,
+                            min: 0,
+                            value: regionStyle.backgroundPositionX,
+                            customSetting: isCustomBoxSetting("backgroundPositionX"),
+                            onReset: () => resetBoxSettings(["backgroundPositionX"]),
+                            onChange: (value) => updateContainerStyle({ backgroundPositionX: value }),
+                          })}
+                          {renderVisualStepperControl("Focal Y %", {
+                            fallback: 50,
+                            max: 100,
+                            min: 0,
+                            value: regionStyle.backgroundPositionY,
+                            customSetting: isCustomBoxSetting("backgroundPositionY"),
+                            onReset: () => resetBoxSettings(["backgroundPositionY"]),
+                            onChange: (value) => updateContainerStyle({ backgroundPositionY: value }),
+                          })}
+                        </>
+                      )}
+                      {renderVisualSelectControl("Repeat", {
+                        value: String(regionStyle.backgroundRepeat || "no-repeat"),
+                        customSetting: isCustomBoxSetting("backgroundRepeat"),
+                        onReset: () => resetBoxSettings(["backgroundRepeat"]),
+                        onChange: (value) => updateContainerStyle({ backgroundRepeat: value }),
+                        children: (
+                          <>
+                            <option value="no-repeat">No repeat</option>
+                            <option value="repeat">Repeat</option>
+                            <option value="repeat-x">Repeat X</option>
+                            <option value="repeat-y">Repeat Y</option>
+                            <option value="space">Space</option>
+                            <option value="round">Round</option>
+                          </>
+                        ),
+                      })}
+                    </div>
+                  </details>
+                  <details className="visual-style-details">
+                    <summary>Image adjustments</summary>
+                    <div className="visual-style-detail-controls">
+                      {renderVisualStepperControl("Image %", {
+                        fallback: 100,
+                        max: 100,
+                        min: 0,
+                        value: regionStyle.backgroundOpacity,
+                        customSetting: isCustomBoxSetting("backgroundOpacity"),
+                        onReset: () => resetBoxSettings(["backgroundOpacity"]),
+                        onChange: (value) => updateContainerStyle({ backgroundOpacity: value }),
+                      })}
+                      {renderVisualSelectControl("Blend", {
+                        value: String(regionStyle.backgroundBlendMode || "normal"),
+                        customSetting: isCustomBoxSetting("backgroundBlendMode"),
+                        onReset: () => resetBoxSettings(["backgroundBlendMode"]),
+                        onChange: (value) => updateContainerStyle({ backgroundBlendMode: value }),
+                        children: (
+                          <>
+                            <option value="normal">Normal</option>
+                            <option value="multiply">Multiply</option>
+                            <option value="screen">Screen</option>
+                            <option value="overlay">Overlay</option>
+                            <option value="soft-light">Soft light</option>
+                            <option value="luminosity">Luminosity</option>
+                          </>
+                        ),
+                      })}
+                      {renderVisualColorControl("Overlay", {
+                        value: regionStyle.backgroundOverlayColor,
+                        fallback: "#000000",
+                        customSetting: isCustomBoxSetting("backgroundOverlayColor"),
+                        onReset: () => resetBoxSettings(["backgroundOverlayColor"]),
+                        onChange: (value) => updateContainerStyle({ backgroundOverlayColor: value }),
+                      })}
+                      {renderVisualStepperControl("Overlay %", {
+                        fallback: 0,
+                        max: 90,
+                        min: 0,
+                        value: regionStyle.backgroundOverlayOpacity,
+                        customSetting: isCustomBoxSetting("backgroundOverlayOpacity"),
+                        onReset: () => resetBoxSettings(["backgroundOverlayOpacity"]),
+                        onChange: (value) => updateContainerStyle({ backgroundOverlayOpacity: value }),
+                      })}
+                      {renderVisualStepperControl("Blur", {
+                        fallback: 0,
+                        max: 40,
+                        min: 0,
+                        value: regionStyle.backgroundFilterBlur,
+                        customSetting: isCustomBoxSetting("backgroundFilterBlur"),
+                        onReset: () => resetBoxSettings(["backgroundFilterBlur"]),
+                        onChange: (value) => updateContainerStyle({ backgroundFilterBlur: value }),
+                      })}
+                      {renderVisualStepperControl("Bright %", {
+                        fallback: 100,
+                        max: 200,
+                        min: 0,
+                        value: regionStyle.backgroundFilterBrightness,
+                        customSetting: isCustomBoxSetting("backgroundFilterBrightness"),
+                        onReset: () => resetBoxSettings(["backgroundFilterBrightness"]),
+                        onChange: (value) => updateContainerStyle({ backgroundFilterBrightness: value }),
+                      })}
+                      {renderVisualStepperControl("Contrast %", {
+                        fallback: 100,
+                        max: 200,
+                        min: 0,
+                        value: regionStyle.backgroundFilterContrast,
+                        customSetting: isCustomBoxSetting("backgroundFilterContrast"),
+                        onReset: () => resetBoxSettings(["backgroundFilterContrast"]),
+                        onChange: (value) => updateContainerStyle({ backgroundFilterContrast: value }),
+                      })}
+                      {renderVisualStepperControl("Saturate %", {
+                        fallback: 100,
+                        max: 250,
+                        min: 0,
+                        value: regionStyle.backgroundFilterSaturate,
+                        customSetting: isCustomBoxSetting("backgroundFilterSaturate"),
+                        onReset: () => resetBoxSettings(["backgroundFilterSaturate"]),
+                        onChange: (value) => updateContainerStyle({ backgroundFilterSaturate: value }),
+                      })}
+                      {renderVisualStepperControl("Gray %", {
+                        fallback: 0,
+                        max: 100,
+                        min: 0,
+                        value: regionStyle.backgroundFilterGrayscale,
+                        customSetting: isCustomBoxSetting("backgroundFilterGrayscale"),
+                        onReset: () => resetBoxSettings(["backgroundFilterGrayscale"]),
+                        onChange: (value) => updateContainerStyle({ backgroundFilterGrayscale: value }),
+                      })}
+                    </div>
+                  </details>
                 </>
               )}
             </section>
-            <section className="visual-style-section">
+            <section id="visual-style-border" className="visual-style-section">
               <header>
                 <strong>Border</strong>
                 <small>Outline and shape</small>
               </header>
-              <label>
-                <span>Color</span>
-                <input
-                  type="color"
-                  value={regionStyle.borderColor || "#b9c9df"}
-                  onChange={(event) => updateContainerStyle({ borderColor: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Width</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="8"
-                  value={Number(regionStyle.borderWidth ?? 1)}
-                  onChange={(event) => updateContainerStyle({ borderWidth: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                <span>Radius</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="48"
-                  value={Number(regionStyle.borderRadius ?? 8)}
-                  onChange={(event) => updateContainerStyle({ borderRadius: Number(event.target.value) })}
-                />
-              </label>
+              {renderVisualColorControl("Color", {
+                value: regionStyle.borderColor,
+                fallback: "#ffffff",
+                customSetting: isCustomBoxSetting("borderColor"),
+                onReset: () => resetBoxSettings(["borderColor"]),
+                onChange: (value) => updateContainerStyle({ borderColor: value }),
+              })}
+              {renderVisualSelectControl("Style", {
+                value: String(regionStyle.borderStyle || "solid"),
+                customSetting: isCustomBoxSetting("borderStyle"),
+                onReset: () => resetBoxSettings(["borderStyle"]),
+                onChange: (value) => updateContainerStyle({ borderStyle: value }),
+                children: (
+                  <>
+                    <option value="solid">Solid</option>
+                    <option value="dashed">Dashed</option>
+                    <option value="dotted">Dotted</option>
+                    <option value="double">Double</option>
+                    <option value="none">None</option>
+                  </>
+                ),
+              })}
+              {renderVisualStyleMeasureControl("Width", {
+                max: 8,
+                min: 0,
+                property: "borderWidth",
+                step: 0.25,
+                units: ["px", "rem", "em", "pt"],
+                value: regionStyle.borderWidth ?? 0,
+                customSetting: isCustomBoxSetting("borderWidth"),
+                onReset: () => resetBoxSettings(["borderWidth"]),
+                onChange: updateContainerStyle,
+              })}
+              {renderVisualStyleMeasureControl("Radius", {
+                max: 48,
+                min: 0,
+                property: "borderRadius",
+                step: 0.25,
+                units: ["px", "rem", "em", "%"],
+                value: regionStyle.borderRadius ?? 8,
+                customSetting: isCustomBoxSetting("borderRadius"),
+                onReset: () => resetBoxSettings(["borderRadius"]),
+                onChange: updateContainerStyle,
+              })}
             </section>
-            <section className="visual-style-section">
+            <section id="visual-style-spacing" className="visual-style-section">
               <header>
                 <strong>Spacing</strong>
                 <small>Inside the container</small>
               </header>
-              <label>
-                <span>Padding</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="80"
-                  value={Number(regionStyle.padding ?? 14)}
-                  onChange={(event) => updateContainerStyle({ padding: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                <span>Min height</span>
-                <input
-                  type="number"
-                  min="40"
-                  max="600"
-                  value={Number(regionStyle.minHeight ?? 120)}
-                  onChange={(event) => updateContainerStyle({ minHeight: Number(event.target.value) })}
-                />
-              </label>
+              {renderVisualStyleMeasureControl("Padding", {
+                max: 80,
+                min: 0,
+                property: "padding",
+                step: 0.25,
+                units: ["px", "rem", "em", "%"],
+                value: regionStyle.padding ?? 14,
+                customSetting: isCustomBoxSetting("padding"),
+                onReset: () => resetBoxSettings(["padding"]),
+                onChange: updateContainerStyle,
+              })}
+              {renderVisualStyleMeasureControl("Min height", {
+                max: 600,
+                min: 40,
+                property: "minHeight",
+                step: 0.25,
+                units: ["px", "rem", "em", "vh"],
+                value: regionStyle.minHeight ?? 120,
+                customSetting: isCustomBoxSetting("minHeight"),
+                onReset: () => resetBoxSettings(["minHeight"]),
+                onChange: updateContainerStyle,
+              })}
             </section>
             <section className="visual-style-section">
               <header>
                 <strong>Shadow</strong>
                 <small>Depth and emphasis</small>
               </header>
-              <label>
-                <span>Preset</span>
-                <select
-                  value={String(regionStyle.shadowPreset || "none")}
-                  onChange={(event) => updateContainerStyle({ shadowPreset: event.target.value })}
-                >
-                  <option value="none">None</option>
-                  <option value="soft">Soft</option>
-                  <option value="lifted">Lifted</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </label>
+              {renderVisualSelectControl("Preset", {
+                value: String(regionStyle.shadowPreset || "none"),
+                customSetting: isCustomBoxSetting("shadowPreset"),
+                onReset: () => resetBoxSettings(["shadowPreset"]),
+                onChange: (value) => updateContainerStyle({ shadowPreset: value }),
+                children: (
+                  <>
+                    <option value="none">None</option>
+                    <option value="soft">Soft</option>
+                    <option value="lifted">Lifted</option>
+                    <option value="custom">Custom</option>
+                  </>
+                ),
+              })}
               {regionStyle.shadowPreset !== "none" && (
                 <>
-                  <label>
-                    <span>Color</span>
-                    <input
-                      type="color"
-                      value={regionStyle.shadowColor || "#23406f"}
-                      onChange={(event) => updateContainerStyle({ shadowColor: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    <span>Opacity</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="60"
-                      value={Number(regionStyle.shadowOpacity ?? 12)}
-                      onChange={(event) => updateContainerStyle({ shadowOpacity: Number(event.target.value) })}
-                    />
-                  </label>
+                  {renderVisualColorControl("Color", {
+                    value: regionStyle.shadowColor,
+                    fallback: "#23406f",
+                    customSetting: isCustomBoxSetting("shadowColor"),
+                    onReset: () => resetBoxSettings(["shadowColor"]),
+                    onChange: (value) => updateContainerStyle({ shadowColor: value }),
+                  })}
+                  {renderVisualStepperControl("Opacity", {
+                    fallback: 12,
+                    max: 60,
+                    min: 0,
+                    value: regionStyle.shadowOpacity,
+                    customSetting: isCustomBoxSetting("shadowOpacity"),
+                    onReset: () => resetBoxSettings(["shadowOpacity"]),
+                    onChange: (value) => updateContainerStyle({ shadowOpacity: value }),
+                  })}
                 </>
               )}
               {regionStyle.shadowPreset === "custom" && (
                 <>
-                  <label>
-                    <span>X offset</span>
-                    <input
-                      type="number"
-                      min="-80"
-                      max="80"
-                      value={Number(regionStyle.shadowX ?? 0)}
-                      onChange={(event) => updateContainerStyle({ shadowX: Number(event.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    <span>Y offset</span>
-                    <input
-                      type="number"
-                      min="-80"
-                      max="80"
-                      value={Number(regionStyle.shadowY ?? 12)}
-                      onChange={(event) => updateContainerStyle({ shadowY: Number(event.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    <span>Blur</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="120"
-                      value={Number(regionStyle.shadowBlur ?? 24)}
-                      onChange={(event) => updateContainerStyle({ shadowBlur: Number(event.target.value) })}
-                    />
-                  </label>
+                  {renderVisualStyleMeasureControl("X offset", {
+                    max: 80,
+                    min: -80,
+                    property: "shadowX",
+                    step: 0.25,
+                    units: ["px", "rem", "em"],
+                    value: regionStyle.shadowX ?? 0,
+                    customSetting: isCustomBoxSetting("shadowX"),
+                    onReset: () => resetBoxSettings(["shadowX"]),
+                    onChange: updateContainerStyle,
+                  })}
+                  {renderVisualStyleMeasureControl("Y offset", {
+                    max: 80,
+                    min: -80,
+                    property: "shadowY",
+                    step: 0.25,
+                    units: ["px", "rem", "em"],
+                    value: regionStyle.shadowY ?? 12,
+                    customSetting: isCustomBoxSetting("shadowY"),
+                    onReset: () => resetBoxSettings(["shadowY"]),
+                    onChange: updateContainerStyle,
+                  })}
+                  {renderVisualStyleMeasureControl("Blur", {
+                    max: 120,
+                    min: 0,
+                    property: "shadowBlur",
+                    step: 0.25,
+                    units: ["px", "rem", "em"],
+                    value: regionStyle.shadowBlur ?? 24,
+                    customSetting: isCustomBoxSetting("shadowBlur"),
+                    onReset: () => resetBoxSettings(["shadowBlur"]),
+                    onChange: updateContainerStyle,
+                  })}
                 </>
               )}
             </section>
-            <section className="visual-style-section">
+            <section id="visual-style-text" className="visual-style-section">
               <header>
                 <strong>Text</strong>
                 <small>Typography for this slot</small>
               </header>
-              <label>
-                <span>Color</span>
-                <input
-                  type="color"
-                  value={textStyle.color || "#172033"}
-                  onChange={(event) => updateTextStyle({ color: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Size</span>
-                <input
-                  type="number"
-                  min="8"
-                  max="80"
-                  value={Number(textStyle.fontSize ?? 13)}
-                  onChange={(event) => updateTextStyle({ fontSize: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                <span>Weight</span>
-                <select
-                  value={String(textStyle.fontWeight ?? 500)}
-                  onChange={(event) => updateTextStyle({ fontWeight: Number(event.target.value) })}
-                >
-                  <option value="400">Regular</option>
-                  <option value="500">Medium</option>
-                  <option value="650">Semibold</option>
-                  <option value="750">Bold</option>
-                  <option value="850">Heavy</option>
-                </select>
-              </label>
-              <label>
-                <span>Align</span>
-                <select
-                  value={String(textStyle.textAlign || "left")}
-                  onChange={(event) => updateTextStyle({ textAlign: event.target.value })}
-                >
-                  <option value="left">Left</option>
-                  <option value="center">Center</option>
-                  <option value="right">Right</option>
-                </select>
-              </label>
+              {renderVisualColorControl("Color", {
+                value: textStyle.color,
+                fallback: "#172033",
+                customSetting: isCustomTextSetting("color"),
+                onReset: () => resetTextSettings(["color"]),
+                onChange: (value) => updateTextStyle({ color: value }),
+              })}
+              {renderVisualSelectControl("Family", {
+                value: String(textStyle.fontFamily || fontFamilyOptions[0]),
+                customSetting: isCustomTextSetting("fontFamily"),
+                onReset: () => resetTextSettings(["fontFamily"]),
+                onChange: (value) => updateTextStyle({ fontFamily: value }),
+                children: (
+                  <>
+                    {fontFamilyOptions.map((fontFamily) => (
+                      <option key={fontFamily} value={fontFamily}>{fontFamily}</option>
+                    ))}
+                  </>
+                ),
+              })}
+              {renderVisualStyleMeasureControl("Size", {
+                max: 80,
+                min: 8,
+                property: "fontSize",
+                step: 0.25,
+                units: ["px", "rem", "em", "pt"],
+                value: textStyle.fontSize ?? 13,
+                customSetting: isCustomTextSetting("fontSize"),
+                onReset: () => resetTextSettings(["fontSize"]),
+                onChange: updateTextStyle,
+              })}
+              {renderVisualSelectControl("Weight", {
+                value: String(textStyle.fontWeight ?? 500),
+                customSetting: isCustomTextSetting("fontWeight"),
+                onReset: () => resetTextSettings(["fontWeight"]),
+                onChange: (value) => updateTextStyle({ fontWeight: Number(value) }),
+                children: (
+                  <>
+                    <option value="400">Regular</option>
+                    <option value="500">Medium</option>
+                    <option value="650">Semibold</option>
+                    <option value="750">Bold</option>
+                    <option value="850">Heavy</option>
+                  </>
+                ),
+              })}
+              {renderVisualSelectControl("Align", {
+                value: String(textStyle.textAlign || "left"),
+                customSetting: isCustomTextSetting("textAlign"),
+                onReset: () => resetTextSettings(["textAlign"]),
+                onChange: (value) => updateTextStyle({ textAlign: value }),
+                children: (
+                  <>
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                  </>
+                ),
+              })}
             </section>
             <section className="visual-style-section">
               <header>
                 <strong>Animation</strong>
                 <small>Preview motion</small>
               </header>
-              <label>
-                <span>Effect</span>
-                <select
-                  value={String(regionStyle.animationName || "none")}
-                  onChange={(event) => updateContainerStyle({ animationName: event.target.value })}
-                >
-                  <option value="none">None</option>
-                  <option value="fade-in">Fade in</option>
-                  <option value="slide-up">Slide up</option>
-                  <option value="scale-in">Scale in</option>
-                </select>
-              </label>
+              {renderVisualSelectControl("Effect", {
+                value: String(regionStyle.animationName || "none"),
+                customSetting: isCustomBoxSetting("animationName"),
+                onReset: () => resetBoxSettings(["animationName"]),
+                onChange: (value) => updateContainerStyle({ animationName: value }),
+                children: (
+                  <>
+                    <option value="none">None</option>
+                    <option value="fade-in">Fade in</option>
+                    <option value="slide-up">Slide up</option>
+                    <option value="scale-in">Scale in</option>
+                  </>
+                ),
+              })}
               {regionStyle.animationName !== "none" && (
                 <>
-                  <label>
-                    <span>Duration</span>
-                    <input
-                      type="number"
-                      min="100"
-                      max="3000"
-                      step="50"
-                      value={Number(regionStyle.animationDuration ?? 600)}
-                      onChange={(event) => updateContainerStyle({ animationDuration: Number(event.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    <span>Delay</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="3000"
-                      step="50"
-                      value={Number(regionStyle.animationDelay ?? 0)}
-                      onChange={(event) => updateContainerStyle({ animationDelay: Number(event.target.value) })}
-                    />
-                  </label>
+                  {renderVisualStyleMeasureControl("Duration", {
+                    defaultUnit: "ms",
+                    max: 3000,
+                    min: 100,
+                    property: "animationDuration",
+                    step: 50,
+                    units: ["ms", "s"],
+                    value: regionStyle.animationDuration ?? 600,
+                    customSetting: isCustomBoxSetting("animationDuration"),
+                    onReset: () => resetBoxSettings(["animationDuration"]),
+                    onChange: updateContainerStyle,
+                  })}
+                  {renderVisualStyleMeasureControl("Delay", {
+                    defaultUnit: "ms",
+                    max: 3000,
+                    min: 0,
+                    property: "animationDelay",
+                    step: 50,
+                    units: ["ms", "s"],
+                    value: regionStyle.animationDelay ?? 0,
+                    customSetting: isCustomBoxSetting("animationDelay"),
+                    onReset: () => resetBoxSettings(["animationDelay"]),
+                    onChange: updateContainerStyle,
+                  })}
                 </>
               )}
             </section>
@@ -14838,7 +18792,13 @@ function App() {
                   key={region.id}
                   className={`visual-layer-row depth-${Math.min(depth, 4)}${selected ? " active" : ""}${region.hidden ? " hidden-layer" : ""}${region.locked ? " locked-layer" : ""}`}
                   draggable
-                  onDragStart={() => setVisualTemplateLayerDragId(region.id)}
+                  onPointerDown={() => setVisualTemplateSelectedRegionId(region.id)}
+                  onClick={() => setVisualTemplateSelectedRegionId(region.id)}
+                  onContextMenu={(event) => openVisualTemplateLayerContextMenu(event, region.id)}
+                  onDragStart={() => {
+                    setVisualTemplateSelectedRegionId(region.id);
+                    setVisualTemplateLayerDragId(region.id);
+                  }}
                   onDragEnd={() => {
                     setVisualTemplateLayerDragId(null);
                     setVisualTemplateDeleteDropActive(false);
@@ -14859,33 +18819,73 @@ function App() {
                     disabled={!hasChildren}
                     title={hasChildren ? (expanded ? "Collapse layer" : "Expand layer") : ""}
                     aria-label={hasChildren ? `${expanded ? "Collapse" : "Expand"} ${region.label}` : undefined}
-                    onClick={() => hasChildren && toggleVisualTemplateLayerExpanded(region.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (hasChildren) toggleVisualTemplateLayerExpanded(region.id);
+                    }}
                   >
                     {hasChildren ? (expanded ? "⌄" : "›") : ""}
                   </button>
                   <span className={`visual-layer-kind ${region.kind}`}>{region.kind === "slot" ? "S" : "C"}</span>
                   <input
+                    ref={(node) => {
+                      visualTemplateRegionNameInputRefs.current[region.id] = node;
+                    }}
                     aria-label={`Rename ${region.label}`}
-                    value={String(region.label || "")}
-                    onChange={(event) => updateVisualTemplateRegionMeta(region.id, { label: event.target.value })}
-                    onClick={() => setVisualTemplateSelectedRegionId(region.id)}
-                    onFocus={() => setVisualTemplateSelectedRegionId(region.id)}
+                    className={visualTemplateRegionNameError?.regionId === region.id ? "invalid" : ""}
+                    title={visualTemplateRegionNameError?.regionId === region.id ? visualTemplateRegionNameError.message : undefined}
+                    value={getVisualTemplateRegionNameValue(region)}
+                    onChange={(event) => updateVisualTemplateRegionNameDraft(region.id, event.target.value)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setVisualTemplateSelectedRegionId(region.id);
+                    }}
+                    onFocus={() => startVisualTemplateRegionNameEdit(region)}
+                    onBlur={() => commitVisualTemplateRegionName(region.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (commitVisualTemplateRegionName(region.id)) event.currentTarget.blur();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelVisualTemplateRegionNameEdit(region.id);
+                        event.currentTarget.blur();
+                      }
+                    }}
                   />
                   <button
                     type="button"
                     className={region.hidden ? "active" : ""}
                     title={region.hidden ? "Show layer" : "Hide layer"}
                     aria-label={region.hidden ? `Show ${region.label}` : `Hide ${region.label}`}
-                    onClick={() => updateVisualTemplateRegionMeta(region.id, { hidden: !region.hidden })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      updateVisualTemplateRegionMeta(region.id, { hidden: !region.hidden });
+                    }}
                   >
                     {region.hidden ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                  <button
+                    type="button"
+                    title={`Duplicate ${region.label}`}
+                    aria-label={`Duplicate ${region.label}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      duplicateVisualTemplateRegion(region.id);
+                    }}
+                  >
+                    <DuplicateIcon />
                   </button>
                   <button
                     type="button"
                     className={region.locked ? "active" : ""}
                     title={region.locked ? "Unlock layer" : "Lock layer"}
                     aria-label={region.locked ? `Unlock ${region.label}` : `Lock ${region.label}`}
-                    onClick={() => updateVisualTemplateRegionMeta(region.id, { locked: !region.locked })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      updateVisualTemplateRegionMeta(region.id, { locked: !region.locked });
+                    }}
                   >
                     {region.locked ? <LockIcon /> : <UnlockIcon />}
                   </button>
@@ -14943,6 +18943,146 @@ function App() {
     );
   }
 
+  function renderInactiveVisualTemplatePreview(content: string, file) {
+    const parsedModel = parseVisualTemplateModel(content);
+    const model = parsedModel.artifactType === "node-binding-template"
+      ? hydrateNodeBindingTemplateModel(parsedModel)
+      : parsedModel;
+    const gridSettings = normalizeVisualTemplateGridSettings(model.gridSettings);
+    const sources = getVisualTemplateSources();
+    const childRegionsByParent = new Map<string, any[]>();
+    model.regions.forEach((region) => {
+      if (!region.parentId) return;
+      const children = childRegionsByParent.get(region.parentId) || [];
+      children.push(region);
+      childRegionsByParent.set(region.parentId, children);
+    });
+    const topLevelRegions = model.regions.filter((region) => !region.parentId);
+    const getRegionSource = (region) => findVisualTemplateSourceForDrop({
+      id: region?.sourceFileId,
+      path: region?.sourcePath,
+    }, sources);
+    const getBindingNodeName = (bindingRule) => {
+      const selector = String(bindingRule?.selector || "").trim();
+      if (!selector) return "";
+      const localNameMatches = [...selector.matchAll(/local-name\(\)\s*=\s*['"]([^'"]+)['"]/g)];
+      const localName = localNameMatches.at(-1)?.[1];
+      if (localName) return localName;
+      const pathMatch = selector.match(/\/([A-Za-z_][\w.-]*)(?:\[[^\]]+\])?(?:\/)?$/);
+      if (pathMatch?.[1]) return pathMatch[1];
+      const attributeMatch = selector.match(/@([A-Za-z_][\w.-]*)$/);
+      if (attributeMatch?.[1]) return `@${attributeMatch[1]}`;
+      return "XML node";
+    };
+    const renderBindingPill = (region, bindingRule) => (
+      <>
+        {bindingRule.selector ? (
+          <span className="visual-binding-pill bound" title={bindingRule.selector}>
+            {getBindingNodeName(bindingRule)}
+          </span>
+        ) : null}
+        <p
+          className={`visual-binding-state-message${bindingRule.selector ? " bound" : " unbound"}`}
+        >
+          {bindingRule.selector ? `This ${region.kind === "slot" ? "slot" : "container"} is XML bound.` : "No XML node bound."}
+        </p>
+      </>
+    );
+    const renderRegionContent = (region) => {
+      const source = getRegionSource(region);
+      const binding = model.artifactType === "binding"
+        ? region.binding || ""
+        : region.binding || (region.role === "headline" ? "title" : "bodyParagraphs");
+      const bindingRule = getVisualTemplateRegionBindingRule(region, model.artifactType !== "binding");
+      const evaluatedBinding = model.artifactType === "binding"
+        ? evaluateVisualTemplateBindingRule(source, bindingRule)
+        : null;
+      const value = model.artifactType === "binding"
+        ? ["valid", "changed"].includes(evaluatedBinding?.status) ? evaluatedBinding.value : ""
+        : getVisualTemplateBindingValue(source, binding);
+      const childRegions = childRegionsByParent.get(region.id) || [];
+      if (model.artifactType === "node-binding-template") {
+        return renderBindingPill(region, bindingRule);
+      }
+      if (model.artifactType === "binding" && !visualTemplatePreviewMode) {
+        return renderBindingPill(region, bindingRule);
+      }
+      if (Array.isArray(value) && value.length) {
+        return value.slice(0, 4).map((item, index) => (
+          <p className="visual-bound-item" key={`${region.id}-${item}-${index}`} style={getVisualTemplateTextCssStyle(region)}>{item}</p>
+        ));
+      }
+      if (value) {
+        return <p style={getVisualTemplateTextCssStyle(region)}>{String(value)}</p>;
+      }
+      if (model.artifactType === "binding" && source) {
+        return <p className="visual-binding-placeholder">No XML node bound</p>;
+      }
+      if (model.artifactType !== "binding" && region.kind !== "slot" && childRegions.length) {
+        return null;
+      }
+      return null;
+    };
+    const renderRegionChrome = (region, className: string, children: React.ReactNode) => {
+      if (region.hidden) return null;
+      const layout = normalizeVisualTemplateLayout(region.layout);
+      const childRegions = childRegionsByParent.get(region.id) || [];
+      return (
+        <section
+          key={region.id}
+          className={`${className} visual-drop-region visual-layout-container${layout.y <= 14 ? " edge-top" : ""}`}
+          style={{ ...getVisualTemplateLayoutStyle(region), ...getVisualTemplateCssStyle(region), outline: 0 }}
+        >
+          <span className={`visual-layout-name ${region.kind === "slot" ? "slot" : "container"}`} title={region.label}>
+            <i aria-hidden="true" />
+            {region.kind === "slot" ? "S" : "C"}
+            <b aria-hidden="true">·</b>
+            {region.label}
+          </span>
+          {children}
+          {childRegions.map((childRegion) => renderRegionChrome(
+            childRegion,
+            "visual-template-slot-region",
+            renderRegionContent(childRegion),
+          ))}
+        </section>
+      );
+    };
+
+    return (
+      <div className="inactive-visual-template-preview">
+        <div className="visual-template-grid canvas-only inactive">
+          <section className="visual-template-canvas" aria-label={`${file?.name || "Visual template"} preview`}>
+            <div className="visual-template-stage" onContextMenu={handleVisualTemplateSurfaceContextMenu}>
+              <div
+                className={`visual-page-preview${gridSettings.showGrid ? " grid-visible" : ""}`}
+                style={{
+                  "--visual-grid-size": `${gridSettings.gridSize}px`,
+                  "--visual-grid-offset": `${-(gridSettings.gridSize / 2)}px`,
+                  "--visual-template-zoom": gridSettings.zoom,
+                  "--visual-preview-width": `${visualTemplatePageSize.width}px`,
+                  "--visual-preview-height": `${visualTemplatePageSize.height}px`,
+                } as React.CSSProperties}
+              >
+                {topLevelRegions.map((region) => renderRegionChrome(
+                  region,
+                  region.kind === "slot" ? "visual-template-slot-region" : "visual-custom-region",
+                  renderRegionContent(region),
+                ))}
+                {!topLevelRegions.length && (
+                  <div className="visual-template-empty-canvas">
+                    <strong>Blank template</strong>
+                    <p>Add a container to start designing.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   function renderVisualTemplateWorkbench() {
     const sources = getVisualTemplateSources();
     const gridSettings = normalizeVisualTemplateGridSettings(visualTemplateModel.gridSettings);
@@ -14955,79 +19095,121 @@ function App() {
       childRegionsByParent.set(region.parentId, children);
     });
     const topLevelRegions = visualTemplateModel.regions.filter((region) => !region.parentId);
-    const getPlaceholderForBinding = (binding: string) => {
-      if (binding === "title") return "Article title goes here";
-      if (binding === "shortdesc") return "Short description";
-      if (binding === "topicrefs") return "Topic reference slot";
-      return "DITA content slot";
+    const structureReadOnly = isVisualTemplateStructureReadOnly();
+    const getBindingNodeName = (bindingRule) => {
+      const selector = String(bindingRule?.selector || "").trim();
+      if (!selector) return "";
+      const localNameMatches = [...selector.matchAll(/local-name\(\)\s*=\s*['"]([^'"]+)['"]/g)];
+      const localName = localNameMatches.at(-1)?.[1];
+      if (localName) return localName;
+      const pathMatch = selector.match(/\/([A-Za-z_][\w.-]*)(?:\[[^\]]+\])?(?:\/)?$/);
+      if (pathMatch?.[1]) return pathMatch[1];
+      const attributeMatch = selector.match(/@([A-Za-z_][\w.-]*)$/);
+      if (attributeMatch?.[1]) return `@${attributeMatch[1]}`;
+      return "XML node";
     };
+    const renderBindingPill = (region, bindingRule) => (
+      <>
+        {bindingRule.selector ? (
+          <span
+            className="visual-binding-pill bound"
+            title={bindingRule.selector}
+          >
+            {getBindingNodeName(bindingRule)}
+          </span>
+        ) : null}
+        <p
+          className={`visual-binding-state-message${bindingRule.selector ? " bound" : " unbound"}`}
+        >
+          {bindingRule.selector ? `This ${region.kind === "slot" ? "slot" : "container"} is XML bound.` : "No XML node bound."}
+        </p>
+      </>
+    );
     const renderRegionContent = (region) => {
       const source = getRegionSource(region);
-      const binding = region.binding || (region.role === "headline" ? "title" : "bodyParagraphs");
-      const value = getVisualTemplateBindingValue(source, binding);
+      const binding = visualTemplateModel.artifactType === "binding"
+        ? region.binding || ""
+        : region.binding || (region.role === "headline" ? "title" : "bodyParagraphs");
+      const bindingRule = getVisualTemplateRegionBindingRule(region, visualTemplateModel.artifactType !== "binding");
+      const evaluatedBinding = visualTemplateModel.artifactType === "binding"
+        ? evaluateVisualTemplateBindingRule(source, bindingRule)
+        : null;
+      const value = visualTemplateModel.artifactType === "binding"
+        ? ["valid", "changed"].includes(evaluatedBinding?.status) ? evaluatedBinding.value : ""
+        : getVisualTemplateBindingValue(source, binding);
       const childRegions = childRegionsByParent.get(region.id) || [];
+      if (visualTemplateModel.artifactType === "node-binding-template") {
+        return renderBindingPill(region, bindingRule);
+      }
+      if (visualTemplateModel.artifactType === "binding" && !visualTemplatePreviewMode) {
+        return renderBindingPill(region, bindingRule);
+      }
       if (Array.isArray(value) && value.length) {
         return value.slice(0, 4).map((item, index) => (
-          <span key={`${region.id}-${item}-${index}`} style={getVisualTemplateTextCssStyle(region)}>{item}</span>
+          <p className="visual-bound-item" key={`${region.id}-${item}-${index}`} style={getVisualTemplateTextCssStyle(region)}>{item}</p>
         ));
       }
       if (value) {
         return <p style={getVisualTemplateTextCssStyle(region)}>{String(value)}</p>;
       }
+      if (visualTemplateModel.artifactType === "binding" && source) {
+        return <p className="visual-binding-placeholder">No XML node bound</p>;
+      }
       if (visualTemplateModel.artifactType !== "binding" && region.kind !== "slot" && childRegions.length) {
         return null;
       }
-      if (visualTemplateModel.artifactType !== "binding" && region.kind === "slot") {
-        return (
-          <p
-            className="visual-template-slot-placeholder"
-            style={{
-              ...getVisualTemplateTextCssStyle(region),
-              color: "#98a2b3",
-              fontStyle: "italic",
-              fontWeight: 500,
-            }}
-          >
-            {getPlaceholderForBinding(binding)}
-          </p>
-        );
-      }
-      return (
-        <>
-          <strong style={getVisualTemplateTextCssStyle(region)}>{region.label || (region.kind === "slot" ? "Slot" : "Container")}</strong>
-          <p style={getVisualTemplateTextCssStyle(region)}>
-            {visualTemplateModel.artifactType === "binding"
-              ? getPlaceholderForBinding(binding)
-              : region.kind === "slot"
-                ? getPlaceholderForBinding(binding)
-                : "Container"}
-          </p>
-        </>
-      );
+      return null;
     };
     const renderRegionChrome = (region, className: string, children: React.ReactNode) => {
       const selected = visualTemplateSelectedRegionId === region.id;
+      const layout = normalizeVisualTemplateLayout(region.layout);
       const childRegions = childRegionsByParent.get(region.id) || [];
       const hasSelectedChild = childRegions.some((childRegion) => childRegion.id === visualTemplateSelectedRegionId);
+      const selectedOutlineColor = region.kind === "slot" ? "#2f9d5c" : "#5758c8";
+      const selectionFrameStyle = selected ? {
+        "--visual-selection-color": selectedOutlineColor,
+      } as React.CSSProperties : undefined;
+      const regionChromeStyle: React.CSSProperties = {
+        outline: 0,
+      };
       if (region.hidden) return null;
       return (
         <section
           key={region.id}
-          className={`${className} visual-drop-region visual-layout-container${visualTemplateDropRegionId === region.id ? " drop-active" : ""}${selected ? " selected" : ""}${hasSelectedChild ? " has-selected-child" : ""}${region.locked ? " locked" : ""}${visualTemplateLayoutDrag?.id === region.id ? " dragging" : ""}${visualTemplateMoveModifierActive ? " move-modifier" : ""}`}
-          style={{ ...getVisualTemplateLayoutStyle(region), ...getVisualTemplateCssStyle(region) }}
+          className={`${className} visual-drop-region visual-layout-container${layout.y <= 14 ? " edge-top" : ""}${visualTemplateDropRegionId === region.id ? " drop-active" : ""}${selected ? " selected" : ""}${hasSelectedChild ? " has-selected-child" : ""}${region.locked ? " locked" : ""}${visualTemplateLayoutDrag?.id === region.id ? " dragging" : ""}${visualTemplateMoveModifierActive ? " move-modifier" : ""}`}
+	          data-active-visual-template-drop-surface="true"
+	          data-visual-template-region-id={region.id}
+	          data-visual-template-region-kind={region.kind}
+	          data-visual-template-region-label={region.label || ""}
+	          data-testid={`visual-region-${region.id}`}
+	          style={{ ...getVisualTemplateLayoutStyle(region), ...getVisualTemplateCssStyle(region), ...regionChromeStyle }}
           onClick={(event) => selectVisualTemplateRegion(event, region.id)}
+          onPointerDown={(event) => {
+            if (structureReadOnly) return;
+            if (!(event.ctrlKey || visualTemplateMoveModifierActive)) return;
+            const target = event.target as HTMLElement;
+            if (target.closest(".visual-layout-name, .visual-layout-name-input, .visual-layout-resize-handle")) return;
+            startVisualTemplateLayoutDrag(event, region, "move");
+          }}
           onDragOver={(event) => handleVisualTemplateDragOver(event, region.id)}
           onDragLeave={(event) => handleVisualTemplateDragLeave(event, region.id)}
           onDrop={(event) => { void bindDroppedFileToVisualRegion(event, region.id); }}
-          title={visualTemplateModel.artifactType === "binding"
-            ? "Drag an edge to resize. Hold Ctrl while dragging an edge to move. Drop a DITA file from Explorer to bind this container."
-            : "Drag an edge to resize. Hold Ctrl while dragging an edge to move. Save this reusable template before creating bindings."}
+          title={structureReadOnly
+            ? "Select this item to edit its binding. Open the source visual template to change layout or style."
+            : visualTemplateModel.artifactType === "binding"
+            ? "Drop a DITA file from Explorer to bind this container."
+            : "Drag an edge to resize. Hold Ctrl and drag inside to move. Drop a DITA file from Explorer to create a binding from this template."}
         >
           <span
             className={`visual-layout-name ${region.kind === "slot" ? "slot" : "container"}${visualTemplateEditingRegionId === region.id ? " editing" : ""}`}
-            title="Double-click to rename"
+            title={structureReadOnly ? "Template item. Edit the source visual template to rename or move it." : "Drag to move. Double-click to rename."}
             onPointerDown={(event) => {
-              event.stopPropagation();
+              if (structureReadOnly) return;
+              if (visualTemplateEditingRegionId === region.id || event.button !== 0 || event.detail > 1) {
+                event.stopPropagation();
+                return;
+              }
+              startVisualTemplateLayoutDrag(event, region, "move");
             }}
             onClick={(event) => {
               event.stopPropagation();
@@ -15036,6 +19218,7 @@ function App() {
             onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              if (structureReadOnly) return;
               startEditingVisualTemplateRegionLabel(region);
             }}
           >
@@ -15044,13 +19227,20 @@ function App() {
             <b aria-hidden="true">·</b>
             {visualTemplateEditingRegionId === region.id ? (
               <input
+                ref={(node) => {
+                  visualTemplateRegionNameInputRefs.current[region.id] = node;
+                }}
                 autoFocus
-                className="visual-layout-name-input"
+                className={`visual-layout-name-input${visualTemplateRegionNameError?.regionId === region.id ? " invalid" : ""}`}
+                title={visualTemplateRegionNameError?.regionId === region.id ? visualTemplateRegionNameError.message : undefined}
                 value={visualTemplateEditingLabel}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
                 onFocus={(event) => event.currentTarget.select()}
-                onChange={(event) => setVisualTemplateEditingLabel(event.target.value)}
+                onChange={(event) => {
+                  setVisualTemplateEditingLabel(event.target.value);
+                  setVisualTemplateRegionNameError((current) => (current?.regionId === region.id ? null : current));
+                }}
                 onBlur={commitVisualTemplateRegionLabel}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -15067,13 +19257,14 @@ function App() {
               region.label
             )}
           </span>
+          {selected && <span className="visual-selection-frame" style={selectionFrameStyle} aria-hidden="true" />}
           {children}
           {childRegions.map((childRegion) => renderRegionChrome(
             childRegion,
             "visual-template-slot-region",
             renderRegionContent(childRegion),
           ))}
-          {!region.locked && (
+          {!structureReadOnly && !region.locked && (
             <>
               {(["nw", "n", "ne", "e", "se", "s", "sw", "w"] as VisualTemplateResizeHandle[]).map((handle) => (
                 <span
@@ -15111,10 +19302,12 @@ function App() {
     const selectedRegion = visualTemplateModel.regions.find((region) => region.id === visualTemplateSelectedRegionId);
     const canUndoVisualTemplate = visualTemplateHistoryVersion >= 0 && visualTemplateUndoStackRef.current.length > 0;
     const canRedoVisualTemplate = visualTemplateHistoryVersion >= 0 && visualTemplateRedoStackRef.current.length > 0;
+    const activePageSize = getVisualTemplateActivePageSize();
+    const hasSourceVisualTemplate = Boolean(structureReadOnly && getCurrentSourceVisualTemplateFile());
 
     return (
-      <div className="visual-template-tab">
-        <div className="visual-template-editor-toolbar" onClick={(event) => event.stopPropagation()}>
+	      <div className="visual-template-tab">
+	        <div className="visual-template-editor-toolbar" data-testid="visual-template-toolbar" onClick={(event) => event.stopPropagation()}>
           <button
             type="button"
             className="icon-only"
@@ -15136,15 +19329,27 @@ function App() {
             <RedoArrowIcon />
           </button>
           <span className="toolbar-divider" aria-hidden="true" />
-          <button type="button" onClick={addVisualTemplateContainer}>
-            <span className="toolbar-icon box" aria-hidden="true" />
-            Add container
-          </button>
-          <button type="button" onClick={addVisualTemplateSlot}>
-            <span className="toolbar-icon plus-circle" aria-hidden="true" />
-            Add slot
-          </button>
-          <span className="toolbar-divider" aria-hidden="true" />
+          {!structureReadOnly && (
+            <>
+              <button type="button" onClick={addVisualTemplateContainer}>
+                <span className="toolbar-icon box" aria-hidden="true" />
+                Add container
+              </button>
+              <button type="button" onClick={addVisualTemplateSlot}>
+                <span className="toolbar-icon plus-circle" aria-hidden="true" />
+                Add slot
+              </button>
+              <button
+                type="button"
+                disabled={!selectedRegion}
+                onClick={() => duplicateVisualTemplateRegion()}
+              >
+                <DuplicateIcon />
+                Duplicate
+              </button>
+              <span className="toolbar-divider" aria-hidden="true" />
+            </>
+          )}
           <button
             type="button"
             className={gridSettings.showGrid ? "active" : ""}
@@ -15165,10 +19370,65 @@ function App() {
             Snap
           </button>
           <span className="toolbar-divider" aria-hidden="true" />
-          <button type="button" disabled>
+          {structureReadOnly && (
+            <button
+              type="button"
+              className="icon-only visual-template-toolbar-action"
+              disabled={!hasSourceVisualTemplate}
+              title={hasSourceVisualTemplate ? "Open source visual template" : "No saved source visual template is linked"}
+              aria-label="Open source template"
+              onClick={() => { void openSourceVisualTemplateTab(); }}
+            >
+              <OpenSourceTemplateIcon />
+            </button>
+          )}
+	          <button
+	            type="button"
+	            className={`icon-only visual-template-toolbar-action${visualTemplatePreviewMode ? " active" : ""}`}
+	            aria-label="Preview"
+	            title={visualTemplatePreviewMode
+              ? "Return to binding edit mode"
+              : structureReadOnly
+              ? "Preview the template populated with bound XML content"
+              : "Preview the design without editor chrome"}
+            onClick={() => {
+              if (visualTemplatePreviewMode) {
+                setVisualTemplatePreviewMode(false);
+                if (visualTemplateEditZoomBeforePreviewRef.current !== null) {
+                  updateVisualTemplateGridSettings({ zoom: visualTemplateEditZoomBeforePreviewRef.current });
+                  visualTemplateEditZoomBeforePreviewRef.current = null;
+                }
+              } else {
+                visualTemplateEditZoomBeforePreviewRef.current = gridSettings.zoom;
+                setVisualTemplatePreviewMode(true);
+              }
+              setVisualTemplateMeasureMode(false);
+              setVisualTemplateMeasurement(null);
+            }}
+          >
             <EyeIcon />
-            Preview
           </button>
+          {visualTemplatePreviewMode && (
+            <div className="visual-template-preview-size-control" aria-label="Preview size">
+              {([
+                ["desktop", "Desktop"],
+                ["tablet", "Tablet"],
+                ["phone", "Phone"],
+              ] as const).map(([size, label]) => (
+                <button
+                  key={size}
+                  type="button"
+                  className={visualTemplatePreviewSize === size ? "active" : ""}
+                  onClick={() => {
+                    setVisualTemplatePreviewSize(size);
+                    fitVisualTemplateToScreen(getVisualTemplatePreviewPageSize(size));
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             className="icon-only"
@@ -15188,43 +19448,78 @@ function App() {
           >
             +
           </button>
-          <span className="toolbar-divider" aria-hidden="true" />
           <button
             type="button"
-            disabled={!visualTemplateSelectedRegionId}
-            onClick={() => deleteVisualTemplateContainer()}
+            title="Fit page to the visible canvas"
+            onClick={() => fitVisualTemplateToScreen()}
           >
-            <TrashIcon />
-            Delete
+            Fit
           </button>
-          <button
-            type="button"
-            disabled={!visualTemplateModel.regions.length}
-            onClick={clearVisualTemplateCanvas}
-          >
-            <TrashIcon />
-            Clear all
-          </button>
+          {!structureReadOnly && (
+            <>
+              <span className="toolbar-divider" aria-hidden="true" />
+              <button
+                type="button"
+                disabled={!visualTemplateSelectedRegionId}
+                onClick={() => deleteVisualTemplateContainer()}
+              >
+                <TrashIcon />
+                Delete
+              </button>
+              <button
+                type="button"
+                disabled={!visualTemplateModel.regions.length}
+                onClick={clearVisualTemplateCanvas}
+              >
+                <ClearCanvasIcon />
+                Clear all
+              </button>
+            </>
+          )}
           <button type="button" className="save-template" onClick={() => { void saveVisualTemplateDraft(); }}>
             <SaveIcon />
             Save
           </button>
+          {(visualTemplateModel.artifactType === "binding" || visualTemplateModel.artifactType === "node-binding-template") && (
+            <button
+              type="button"
+              className={activeSidePanel === "templateBindings" ? "active" : ""}
+              onClick={() => setActiveSidePanel((current) => current === "templateBindings" ? null : "templateBindings")}
+            >
+              Bindings
+            </button>
+          )}
         </div>
 
         <div className="visual-template-grid canvas-only">
-          <section className="visual-template-canvas" aria-label="Visual template canvas">
-            <div className="visual-template-stage">
-              <div
-                ref={visualTemplatePreviewRef}
-                className={`visual-page-preview${gridSettings.showGrid ? " grid-visible" : ""}${visualTemplateMeasureMode ? " measuring" : ""}`}
-                style={{
-                  "--visual-grid-size": `${gridSettings.gridSize}px`,
-                  "--visual-template-zoom": gridSettings.zoom,
-                } as React.CSSProperties}
-                onClick={() => setVisualTemplateSelectedRegionId(null)}
-                onPointerDown={handleVisualTemplateMeasurePointerDown}
-                onPointerMove={handleVisualTemplateMeasurePointerMove}
-                onPointerUp={handleVisualTemplateMeasurePointerUp}
+	          <section className="visual-template-canvas" aria-label="Visual template canvas" data-testid="visual-template-canvas">
+	            <div
+	              className="visual-template-stage"
+	              data-testid="visual-template-stage"
+	              data-active-visual-template-drop-surface="true"
+              ref={visualTemplateStageRef}
+              onContextMenu={handleVisualTemplateSurfaceContextMenu}
+              onDragOver={handleVisualTemplateCanvasDragOver}
+              onDrop={(event) => { void bindDroppedFileToVisualCanvas(event); }}
+            >
+	              <div
+	                ref={visualTemplatePreviewRef}
+	                className={`visual-page-preview${gridSettings.showGrid && !visualTemplatePreviewMode ? " grid-visible" : ""}${visualTemplateMeasureMode && !visualTemplatePreviewMode ? " measuring" : ""}${visualTemplatePreviewMode ? " preview-mode" : ""}`}
+	                data-testid="visual-template-page"
+	                onContextMenu={handleVisualTemplateSurfaceContextMenu}
+	                style={{
+	                  "--visual-grid-size": `${gridSettings.gridSize}px`,
+	                  "--visual-grid-offset": `${-(gridSettings.gridSize / 2)}px`,
+	                  "--visual-template-zoom": gridSettings.zoom,
+                    "--visual-preview-width": `${activePageSize.width}px`,
+                    "--visual-preview-height": `${activePageSize.height}px`,
+	                } as React.CSSProperties}
+                onClick={() => {
+                  if (!visualTemplatePreviewMode) setVisualTemplateSelectedRegionId(null);
+                }}
+                onPointerDown={visualTemplatePreviewMode ? undefined : handleVisualTemplateMeasurePointerDown}
+                onPointerMove={visualTemplatePreviewMode ? undefined : handleVisualTemplateMeasurePointerMove}
+                onPointerUp={visualTemplatePreviewMode ? undefined : handleVisualTemplateMeasurePointerUp}
               >
                 {topLevelRegions.map((region) => renderRegionChrome(
                   region,
@@ -15237,8 +19532,8 @@ function App() {
                     <p>Add a container to start designing.</p>
                   </div>
                 )}
-                {columnGuides}
-                {visualTemplateSmartGuides.map((guide, index) => (
+                {!visualTemplatePreviewMode && columnGuides}
+                {!visualTemplatePreviewMode && visualTemplateSmartGuides.map((guide, index) => (
                   <span
                     key={`${guide.axis}-${guide.value}-${index}`}
                     className={`visual-smart-guide ${guide.axis}`}
@@ -15247,7 +19542,7 @@ function App() {
                       : { top: guide.value, left: guide.from, width: guide.to - guide.from }}
                   />
                 ))}
-                {measurement && (
+                {!visualTemplatePreviewMode && measurement && (
                   <div className="visual-measurement-layer" aria-hidden="true">
                     <span
                       className="visual-measurement-line"
@@ -15274,17 +19569,27 @@ function App() {
             <footer className="visual-template-statusbar">
               <span><i className="dot container" />{containerCount} containers</span>
               <span><i className="dot slot" />{slotCount} slots</span>
-              <span><i className="dot selected" />Selected: {selectedRegion?.label || "none"}</span>
+              <span><i className="dot selected" />{visualTemplatePreviewMode ? "Preview mode" : `Selected: ${selectedRegion?.label || "none"}`}</span>
+              {visualTemplatePreviewMode && <span><i className="dot muted" />{activePageSize.width} x {activePageSize.height}</span>}
               <span><i className="dot muted" />Grid {gridSettings.gridSize}px</span>
               <span><i className="dot muted" />Snap {gridSettings.snapToGrid || gridSettings.snapToObjects ? "on" : "off"}</span>
-              <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}>
-                <TemplateLayersIcon />
-                Layers
-              </button>
-              <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}>
-                <span className="toolbar-icon box" aria-hidden="true" />
-                Layout
-              </button>
+              {structureReadOnly ? (
+                <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateBindings" ? null : "templateBindings")}>
+                  <TemplateBindingsIcon />
+                  Bindings
+                </button>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}>
+                    <TemplateLayersIcon />
+                    Layers
+                  </button>
+                  <button type="button" onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}>
+                    <span className="toolbar-icon box" aria-hidden="true" />
+                    Layout
+                  </button>
+                </>
+              )}
             </footer>
           </section>
         </div>
@@ -15605,14 +19910,121 @@ function App() {
     );
   }
 
+  function isEditorInternalDrag(event: React.DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).some((type) => (
+      type === "application/x-xml-editor-project-node" ||
+      type === "application/x-dita-project-file" ||
+      type === "application/x-xml-editor-tab"
+    ));
+  }
+
+  function shouldBlockInternalDropIntoField(event: React.DragEvent<HTMLElement>) {
+    if (!isEditorInternalDrag(event)) return false;
+    const target = event.target as HTMLElement | null;
+    if (!target) return false;
+    if (target.closest(".visual-drop-region, .visual-style-image-drop-target, .dita-image, .dita-xref, .file-tabs, .file-tab, .project-row")) {
+      return false;
+    }
+    return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  }
+
+  function blockInternalDropIntoField(event: React.DragEvent<HTMLElement>) {
+    if (!shouldBlockInternalDropIntoField(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "none";
+  }
+
+  function getDraggedEditorProjectFileId(event: React.DragEvent<HTMLElement>) {
+    const projectFileData = event.dataTransfer.getData("application/x-dita-project-file");
+    if (projectFileData) {
+      try {
+        const parsed = JSON.parse(projectFileData);
+        if (parsed?.id && findProjectNode(projectTree, parsed.id)?.node?.type === "file") {
+          return parsed.id;
+        }
+      } catch {
+        return "";
+      }
+    }
+
+    const projectNodeId = event.dataTransfer.getData("application/x-xml-editor-project-node");
+    if (!projectNodeId) return "";
+
+    const match = findProjectNode(projectTree, projectNodeId);
+    return match?.node?.type === "file" ? projectNodeId : "";
+  }
+
+  function hasEditorProjectFileDrag(event: React.DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).includes("application/x-dita-project-file") ||
+      Boolean(getDraggedEditorProjectFileId(event));
+  }
+
+  function getEditorDropPaneId(event: React.DragEvent<HTMLElement>) {
+    const target = event.target as HTMLElement | null;
+    const paneElement = target?.closest("[data-editor-pane-id]") as HTMLElement | null;
+    return paneElement?.dataset.editorPaneId || activePaneId;
+  }
+
+  function handleEditorProjectFileDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!hasEditorProjectFileDrag(event)) return;
+
+    if (getVisualTemplateDropTarget(event) && canDropVisualTemplateSource(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setEditorFileDropActive(false);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setEditorFileDropActive(true);
+  }
+
+  function handleEditorProjectFileDrop(event: React.DragEvent<HTMLElement>) {
+    const visualTemplateDropTarget = getVisualTemplateDropTarget(event);
+    if (visualTemplateDropTarget && canDropVisualTemplateSource(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      setEditorFileDropActive(false);
+      if (visualTemplateDropTarget.regionId) {
+        void bindDroppedFileToVisualRegion(event, visualTemplateDropTarget.regionId);
+      } else {
+        void bindDroppedFileToVisualCanvas(event);
+      }
+      return;
+    }
+
+    const fileId = getDraggedEditorProjectFileId(event);
+    if (!fileId) {
+      setEditorFileDropActive(false);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const targetPaneId = getEditorDropPaneId(event);
+    setEditorFileDropActive(false);
+    void openProjectFile(fileId, targetPaneId);
+  }
+
   return (
-    <main className="app-shell" onClick={() => {
-      setContextMenu(null);
-      setTabContextMenu(null);
-      setProjectContextMenu(null);
-      setActiveAppMenuId(null);
-      setAccountMenuOpen(false);
-    }}>
+	    <main
+	      className="app-shell"
+	      data-testid="app-shell"
+	      onClick={() => {
+        setContextMenu(null);
+        setTabContextMenu(null);
+        setProjectContextMenu(null);
+        setVisualTemplateLayerContextMenu(null);
+        setActiveAppMenuId(null);
+        setAccountMenuOpen(false);
+      }}
+      onDragOverCapture={blockInternalDropIntoField}
+      onDropCapture={blockInternalDropIntoField}
+    >
       <header
         className={`top-panel${activeIsXml && activeFile ? " editing" : " idle"}`}
         onContextMenu={(event) => event.preventDefault()}
@@ -15767,9 +20179,13 @@ function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xml,.dita,.ditamap,.txt,.md,.html,.htm,.css,.js,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,image/*,text/*,application/xml"
+        accept=".xml,.dita,.ditamap,.txt,.md,.html,.htm,.css,.js,.json,.csv,.yaml,.yml,.pdf,.png,.jpg,.jpeg,.gif,.svg,.webp,.avif,image/*,text/*,application/xml,application/pdf"
         hidden
-        onChange={(event) => loadFile(event.target.files?.[0])}
+        multiple
+        onChange={(event) => {
+          void importLocalFilesIntoExplorer(event.target.files);
+          event.currentTarget.value = "";
+        }}
       />
 
       <section className="workspace" style={workspaceStyle}>
@@ -15839,7 +20255,8 @@ function App() {
                 node={projectTree}
                 activeFileId={activeFileId}
                 selectedProjectId={selectedProjectId}
-                onSelect={setSelectedProjectId}
+                selectedProjectIds={selectedProjectIds}
+                onSelect={selectProjectExplorerNode}
                 onOpenFile={openProjectFile}
                 editingNodeId={editingProjectNodeId}
                 onCommitRename={commitProjectItemRename}
@@ -15847,14 +20264,24 @@ function App() {
                 onOpenContextMenu={(event, nodeId) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  setSelectedProjectId(nodeId);
+                  if (!selectedProjectIds.has(nodeId)) {
+                    setSelectedProjectId(nodeId);
+                    setSelectedProjectIds(new Set([nodeId]));
+                    projectSelectionAnchorRef.current = nodeId;
+                  }
                   setProjectContextMenu({
                     x: event.clientX,
                     y: event.clientY,
                     nodeId,
                   });
                 }}
-                onMove={moveProjectItem}
+              onMove={moveProjectItem}
+              onImportFiles={(files, targetNodeId, placement) => {
+                void importLocalFilesIntoExplorer(files, targetNodeId, placement);
+              }}
+              cutNodeId={projectClipboardMode === "cut" ? projectClipboardNodeId : null}
+              draggingProjectNodeId={draggingProjectNodeId}
+              onDraggingProjectNodeChange={setDraggingProjectNodeId}
                 dropTarget={projectDropTarget}
                 onDropTargetChange={setProjectDropTarget}
                 query=""
@@ -16155,17 +20582,31 @@ function App() {
           onPointerDown={activeLeftPanel ? startNavigatorResize : undefined}
         />
 
-        <div className="editor-workspace">
+        <div
+          className={`editor-workspace${editorFileDropActive ? " project-file-drop-active" : ""}`}
+          onDragOver={handleEditorProjectFileDragOver}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setEditorFileDropActive(false);
+            }
+          }}
+          onDrop={handleEditorProjectFileDrop}
+          onDragEnd={() => setEditorFileDropActive(false)}
+        >
           <section
             className={`editor-panes ${hasSecondaryPane ? `split-${paneSplitDirection}` : ""}`}
             style={editorPaneStyle}
-            onContextMenu={(event) => event.preventDefault()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              closeTransientContextMenus();
+            }}
           >
           {tabPanes.map((pane, paneIndex) => {
             const paneFileId = pane.activeFileId || pane.tabs[0];
             const paneFile = findProjectNode(projectTree, paneFileId)?.node ||
               (paneFileId === specializationsTabId ? specializationsTabFile : null) ||
               (paneFileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
+              (paneFileId === designSystemTabId ? designSystemTabFile : null) ||
               (paneFileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(paneFileId)) : null);
             const paneFileKind = getProjectFileKind(paneFile);
             const paneFilePath = getProjectFilePath(projectTree, paneFileId);
@@ -16185,12 +20626,19 @@ function App() {
               <React.Fragment key={pane.id}>
             <section
               className={`editor-column ${pane.id === activePaneId ? "active-pane" : ""}`}
+              data-editor-pane-id={pane.id}
               onClick={() => setActivePaneId(pane.id)}
             >
           <div
             className={`file-tabs${tabDropTarget?.paneId === pane.id && tabDropTarget?.placement === "end" ? " drag-over" : ""}`}
             role="tablist"
             aria-label={`${pane.label} open files`}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              if (!(event.target as HTMLElement).closest(".file-tab")) {
+                closeTransientContextMenus();
+              }
+            }}
             onDragOver={(event) => {
               if (!Array.from(event.dataTransfer.types).includes("application/x-xml-editor-tab")) return;
 
@@ -16216,13 +20664,13 @@ function App() {
               const tabFile = findProjectNode(projectTree, tab.fileId)?.node ||
                 (tab.fileId === specializationsTabId ? specializationsTabFile : null) ||
                 (tab.fileId === visualTemplatesTabId ? visualTemplatesTabFile : null) ||
+                (tab.fileId === designSystemTabId ? designSystemTabFile : null) ||
                 (tab.fileId?.startsWith(`${authoringProfileTabPrefix}-`) ? createAuthoringProfileTabFile(getAuthoringProfileDocumentTypeFromTabId(tab.fileId)) : null);
               if (!tabFile || tabFile.type !== "file") return null;
 
               const active = pane.id === activePaneId && tab.fileId === activeFileId;
               const displayed = tab.fileId === pane.activeFileId;
               const tabFileKind = getProjectFileKind(tabFile);
-              const isDocumentTab = ["xml", "text", "html", "image"].includes(tabFileKind) && !tabFile.generated;
               const dragOver = tabDropTarget?.paneId === pane.id &&
                 tabDropTarget?.fileId === tab.fileId &&
                 tabDropTarget?.placement === "tab";
@@ -16233,8 +20681,11 @@ function App() {
 
               return (
                 <button
-                  className={`file-tab${displayed ? " displayed" : ""}${active ? " active" : ""}${dragOver ? " drag-over" : ""}`}
-                  key={`${pane.id}-${tab.fileId}`}
+	                  className={`file-tab${displayed ? " displayed" : ""}${active ? " active" : ""}${dragOver ? " drag-over" : ""}`}
+	                  data-testid="file-tab"
+	                  data-file-id={tab.fileId}
+	                  data-pane-id={pane.id}
+	                  key={`${pane.id}-${tab.fileId}`}
                   role="tab"
                   aria-selected={active}
                   draggable
@@ -16278,13 +20729,9 @@ function App() {
                   onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    if (!isDocumentTab) {
-                      setTabContextMenu(null);
-                      return;
-                    }
                     setActivePaneId(pane.id);
                     setActiveFileId(tab.fileId);
-                    setSelectedProjectId(tab.fileId === specializationsTabId ? null : tab.fileId);
+                    setSelectedProjectId(tab.fileId === specializationsTabId || tab.fileId === designSystemTabId ? null : tab.fileId);
                     setTabContextMenu({
                       x: event.clientX,
                       y: event.clientY,
@@ -16515,6 +20962,8 @@ function App() {
             </>
           ) : pane.id === activePaneId && paneFileKind === "specializations" ? (
             renderSpecializationsWorkbench()
+          ) : pane.id === activePaneId && paneFileKind === "design-system" ? (
+            renderDesignSystemWorkbench()
           ) : pane.id === activePaneId && paneFileKind === "visual-template" ? (
             renderVisualTemplateWorkbench()
           ) : pane.id === activePaneId && paneFileKind === "authoring-profile" ? (
@@ -16589,6 +21038,8 @@ function App() {
                 </article>
               ) : paneFileKind === "image" ? (
                 <ImageViewer file={paneFile} />
+              ) : paneFileKind === "visual-template" ? (
+                renderInactiveVisualTemplatePreview(paneXml, paneFile)
               ) : paneFileKind === "git-history" ? (
                 <GitHistoryViewer
                   payload={parseGitHistoryPayload(paneXml)}
@@ -16848,6 +21299,7 @@ function App() {
               selectedPath={selectedPath}
               childOptions={insertContext.childOptions}
               siblingOptions={insertContext.siblingOptions}
+              styleClasses={designSystem.styleClasses}
               hrefValidation={hrefValidationMap[pathKeyFor(selectedPath)]}
               onClose={() => setActiveSidePanel(null)}
               onInsert={insertElement}
@@ -17476,145 +21928,43 @@ function App() {
         )}
 
         {activeIsVisualTemplateBinding && renderedSidePanel === "templateSources" && (
-          <aside
-            className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
-            aria-label="Dropped files panel"
-            aria-hidden={activeSidePanel ? undefined : "true"}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            <div className="panel-title">
-              <span>Dropped Files</span>
-              <div className="panel-title-actions">
-                <strong>{getVisualTemplateBoundSources().length}</strong>
-                <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Dropped Files panel" onClick={() => setActiveSidePanel(null)}>
-                  <CloseIcon />
-                </button>
-              </div>
-            </div>
-            <div className="visual-template-side-content">
-              {getVisualTemplateBoundSources().length ? (
-                getVisualTemplateBoundSources().map((source) => (
-                  <div
-                    className={`visual-template-source-card${visualTemplateSourceId === source.id ? " active" : ""}`}
-                    key={source.id}
-                  >
-                    <button
-                      type="button"
-                      className="visual-template-source-main"
-                      onClick={() => setVisualTemplateSourceId(source.id)}
-                    >
-                      <span>{source.rootName}</span>
-                      <strong>{source.name}</strong>
-                      {source.title && source.title !== source.name ? <em>{source.title}</em> : null}
-                      <small>{source.path}</small>
-                    </button>
-                    <button
-                      type="button"
-                      className="visual-template-source-remove"
-                      title={`Remove ${source.title} from binding sources`}
-                      aria-label={`Remove ${source.title} from binding sources`}
-                      onClick={() => removeVisualTemplateSource(source)}
-                    >
-                      <CloseIcon />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="visual-template-empty-source">
-                  <strong>No dropped files</strong>
-                  <p>Drag DITA topics or maps from Explorer onto a binding container to add sources here.</p>
-                </div>
-              )}
-            </div>
-          </aside>
+          <TemplateSourcesPanel
+            closeIcon={<CloseIcon />}
+            isCollapsed={!activeSidePanel}
+            onClose={() => setActiveSidePanel(null)}
+            onRemoveSource={removeVisualTemplateSource}
+            onSelectSource={setVisualTemplateSourceId}
+            selectedSourceId={visualTemplateSourceId}
+            sources={getVisualTemplateAvailableBindingSources()}
+          />
         )}
 
         {activeIsVisualTemplateBinding && renderedSidePanel === "templateBindings" && (
-          <aside
-            className={`inspector side-panel visual-template-side-panel right-panel${activeSidePanel ? "" : " collapsed"}`}
-            aria-label="Template bindings panel"
-            aria-hidden={activeSidePanel ? undefined : "true"}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            <div className="panel-title">
-              <span>Container Slots</span>
-              <div className="panel-title-actions">
-                <strong>{visualTemplateModel.regions.length}</strong>
-                <button type="button" className="panel-close-button" title="Close panel" aria-label="Close Bindings panel" onClick={() => setActiveSidePanel(null)}>
-                  <CloseIcon />
-                </button>
-              </div>
-            </div>
-            <div className="visual-template-side-content">
-              {visualTemplateModel.regions.map((region) => {
-                const sources = getVisualTemplateSources();
-                const regionSource = getVisualTemplateRegionSource(region, sources);
-                const droppedSources = getVisualTemplateBoundSources(sources);
-                const bindingOptions = getVisualTemplateBindingOptions(regionSource);
-                const bindingPreview = getVisualTemplateBindingPreview(regionSource, region.binding);
-                return (
-                  <div className="visual-binding-row editable" key={region.id}>
-                    <header>
-                      <div>
-                        <strong>{region.label} container</strong>
-                        <small>{region.role} layout · {region.binding} slot</small>
-                      </div>
-                      {regionSource ? (
-                        <button
-                          className="visual-binding-reset"
-                          type="button"
-                          onClick={() => resetVisualTemplateRegion(region.id)}
-                        >
-                          Reset
-                        </button>
-                      ) : null}
-                    </header>
-                    <label>
-                      <span>Source</span>
-                      <select
-                        value={regionSource?.id || ""}
-                        onChange={(event) => setVisualTemplateRegionSource(region.id, event.target.value)}
-                      >
-                        <option value="">Drop a source file</option>
-                        {droppedSources.map((source) => (
-                          <option value={source.id} key={source.id}>
-                            {getVisualTemplateSourceLabel(source)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>Binding</span>
-                      <select
-                        value={region.binding}
-                        onChange={(event) => updateVisualTemplateRegion(region.id, { binding: event.target.value })}
-                      >
-                        {bindingOptions.map((option) => (
-                          <option value={option.value} key={option.value}>
-                            {option.label}{option.hasValue === false ? " (empty)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="visual-binding-preview">
-                      <span>Preview</span>
-                      <p>{bindingPreview}</p>
-                    </div>
-                    <code>
-                      {regionSource ? `${regionSource.path}#${region.binding}` : "No source bound"}
-                    </code>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
+          <TemplateBindingsPanel
+            boundSources={getVisualTemplateAvailableBindingSources()}
+            closeIcon={<CloseIcon />}
+            getRegionSource={getVisualTemplateRegionSource}
+            getSourceLabel={getVisualTemplateSourceLabel}
+            isCollapsed={!activeSidePanel}
+            isReusableTemplate={visualTemplateModel.artifactType === "node-binding-template"}
+            onAcceptMatch={(regionId, fingerprint) => updateVisualTemplateRegionBindingRule(regionId, { fingerprint })}
+            onClose={() => setActiveSidePanel(null)}
+            onResetRegion={resetVisualTemplateRegion}
+            onSelectRegion={setVisualTemplateSelectedRegionId}
+            onSetRegionSource={setVisualTemplateRegionSource}
+            onUpdateBindingRule={updateVisualTemplateRegionBindingRule}
+            onUpdateRegion={updateVisualTemplateRegion}
+            regions={visualTemplateModel.regions}
+            selectedRegionId={visualTemplateSelectedRegionId}
+            sources={getVisualTemplateSources()}
+          />
         )}
 
-        {renderedSidePanel === "templateLayers" && renderVisualTemplateLayersPanel()}
+        {!activeVisualTemplateStructureLocked && renderedSidePanel === "templateLayers" && renderVisualTemplateLayersPanel()}
 
-        {renderedSidePanel === "templateLayout" && renderVisualTemplateLayoutPanel()}
+        {!activeVisualTemplateStructureLocked && renderedSidePanel === "templateLayout" && renderVisualTemplateLayoutPanel()}
 
-        {renderedSidePanel === "templateStyle" && renderVisualTemplateStylePanel()}
+        {!activeVisualTemplateStructureLocked && renderedSidePanel === "templateStyle" && renderVisualTemplateStylePanel()}
 
         <nav className="side-dock" aria-label="Right side panels" onContextMenu={(event) => event.preventDefault()}>
           {activeIsVisualTemplate ? (
@@ -17645,39 +21995,43 @@ function App() {
                   </button>
                 </>
               )}
-              <button
-                className={activeSidePanel === "templateLayers" ? "active" : ""}
-                type="button"
-                title="Layers"
-                data-tooltip="Layers"
-                aria-label="Toggle Layers panel"
-                aria-pressed={activeSidePanel === "templateLayers"}
-                onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}
-              >
-                <TemplateLayersIcon />
-              </button>
-              <button
-                className={activeSidePanel === "templateLayout" ? "active" : ""}
-                type="button"
-                title="Layout"
-                data-tooltip="Layout"
-                aria-label="Toggle Layout panel"
-                aria-pressed={activeSidePanel === "templateLayout"}
-                onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}
-              >
-                <TemplateLayoutIcon />
-              </button>
-              <button
-                className={activeSidePanel === "templateStyle" ? "active" : ""}
-                type="button"
-                title="Style"
-                data-tooltip="Style"
-                aria-label="Toggle Style panel"
-                aria-pressed={activeSidePanel === "templateStyle"}
-                onClick={() => setActiveSidePanel((current) => current === "templateStyle" ? null : "templateStyle")}
-              >
-                <TemplateStyleIcon />
-              </button>
+              {!activeVisualTemplateStructureLocked && (
+                <>
+                  <button
+                    className={activeSidePanel === "templateLayers" ? "active" : ""}
+                    type="button"
+                    title="Layers"
+                    data-tooltip="Layers"
+                    aria-label="Toggle Layers panel"
+                    aria-pressed={activeSidePanel === "templateLayers"}
+                    onClick={() => setActiveSidePanel((current) => current === "templateLayers" ? null : "templateLayers")}
+                  >
+                    <TemplateLayersIcon />
+                  </button>
+                  <button
+                    className={activeSidePanel === "templateLayout" ? "active" : ""}
+                    type="button"
+                    title="Layout"
+                    data-tooltip="Layout"
+                    aria-label="Toggle Layout panel"
+                    aria-pressed={activeSidePanel === "templateLayout"}
+                    onClick={() => setActiveSidePanel((current) => current === "templateLayout" ? null : "templateLayout")}
+                  >
+                    <TemplateLayoutIcon />
+                  </button>
+                  <button
+                    className={activeSidePanel === "templateStyle" ? "active" : ""}
+                    type="button"
+                    title="Style"
+                    data-tooltip="Style"
+                    aria-label="Toggle Style panel"
+                    aria-pressed={activeSidePanel === "templateStyle"}
+                    onClick={() => setActiveSidePanel((current) => current === "templateStyle" ? null : "templateStyle")}
+                  >
+                    <TemplateStyleIcon />
+                  </button>
+                </>
+              )}
               <button
                 className={activeSidePanel === "notifications" ? "active" : ""}
                 type="button"
@@ -17693,28 +22047,32 @@ function App() {
             </>
           ) : (
             <>
-          <button
-            className={activeSidePanel === "inspector" ? "active" : ""}
-            type="button"
-            title="Inspector"
-            data-tooltip="Inspector"
-            aria-label="Toggle Inspector panel"
-            aria-pressed={activeSidePanel === "inspector"}
-            onClick={() => setActiveSidePanel((current) => current === "inspector" ? null : "inspector")}
-          >
-            <InspectorIcon />
-          </button>
-          <button
-            className={activeSidePanel === "schema" ? "active" : ""}
-            type="button"
-            title="Schema"
-            data-tooltip="Schema"
-            aria-label="Toggle Schema panel"
-            aria-pressed={activeSidePanel === "schema"}
-            onClick={() => setActiveSidePanel((current) => current === "schema" ? null : "schema")}
-          >
-            <SchemaIcon />
-          </button>
+          {visibleSidePanels.includes("inspector") && (
+            <button
+              className={activeSidePanel === "inspector" ? "active" : ""}
+              type="button"
+              title="Inspector"
+              data-tooltip="Inspector"
+              aria-label="Toggle Inspector panel"
+              aria-pressed={activeSidePanel === "inspector"}
+              onClick={() => setActiveSidePanel((current) => current === "inspector" ? null : "inspector")}
+            >
+              <InspectorIcon />
+            </button>
+          )}
+          {visibleSidePanels.includes("schema") && (
+            <button
+              className={activeSidePanel === "schema" ? "active" : ""}
+              type="button"
+              title="Schema"
+              data-tooltip="Schema"
+              aria-label="Toggle Schema panel"
+              aria-pressed={activeSidePanel === "schema"}
+              onClick={() => setActiveSidePanel((current) => current === "schema" ? null : "schema")}
+            >
+              <SchemaIcon />
+            </button>
+          )}
           <button
             className={activeSidePanel === "search" ? "active" : ""}
             type="button"
@@ -17844,7 +22202,7 @@ function App() {
           }}
         />
       )}
-      {tabContextMenu && (
+      {tabContextMenu && createPortal(
         <TabContextMenu
           contextMenu={tabContextMenu}
           paneCount={tabPanes.length}
@@ -17852,6 +22210,10 @@ function App() {
           hasBottomPane={hasBottomPane}
           hasSecondaryPane={hasSecondaryPane}
           sourcePaneTabCount={tabPanes.find((pane) => pane.id === tabContextMenu.paneId)?.tabs.length || 0}
+          isTemplateTab={getProjectFileKind(
+            findProjectNode(projectTree, tabContextMenu.fileId)?.node ||
+              (tabContextMenu.fileId === visualTemplatesTabId ? visualTemplatesTabFile : null),
+          ) === "visual-template"}
           fileName={getFileName(tabContextMenu.fileId)}
           onClose={() => setTabContextMenu(null)}
           onCloseTab={() => closeTab(tabContextMenu.fileId, null, tabContextMenu.paneId)}
@@ -17864,12 +22226,16 @@ function App() {
           onMoveLeft={() => moveTabToPane(tabContextMenu.fileId, tabContextMenu.paneId, "pane-left")}
           onMoveRight={() => moveTabToPane(tabContextMenu.fileId, tabContextMenu.paneId, "pane-right")}
           onMoveBottom={() => moveTabToPane(tabContextMenu.fileId, tabContextMenu.paneId, "pane-bottom")}
-        />
+        />,
+        document.body,
       )}
       {projectContextMenu && (
         <ProjectContextMenu
           contextMenu={projectContextMenu}
           projectTree={projectTree}
+          clipboardNodeId={projectClipboardNodeId}
+          clipboardMode={projectClipboardMode}
+          selectedNodeCount={selectedProjectIds.has(projectContextMenu.nodeId) ? selectedProjectIds.size : 1}
           onOpen={(nodeId) => {
             const node = findProjectNode(projectTree, nodeId)?.node;
             if (node?.type === "file") {
@@ -17897,6 +22263,14 @@ function App() {
             copyProjectItemById(nodeId);
             setProjectContextMenu(null);
           }}
+          onCut={(nodeId) => {
+            cutProjectItemById(nodeId);
+            setProjectContextMenu(null);
+          }}
+          onPaste={(nodeId) => {
+            void pasteProjectItemInto(nodeId);
+            setProjectContextMenu(null);
+          }}
           onDelete={(nodeId) => {
             deleteProjectItemById(nodeId);
             setProjectContextMenu(null);
@@ -17914,6 +22288,50 @@ function App() {
             setProjectContextMenu(null);
           }}
           onClose={() => setProjectContextMenu(null)}
+        />
+      )}
+      {!activeVisualTemplateStructureLocked && visualTemplateLayerContextMenu && (
+        <VisualTemplateLayerContextMenu
+          contextMenu={visualTemplateLayerContextMenu}
+          regions={visualTemplateModel.regions}
+          onRename={(regionId) => {
+            renameVisualTemplateLayerFromMenu(regionId);
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onDuplicate={(regionId) => {
+            duplicateVisualTemplateRegion(regionId);
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onBringToFront={(regionId) => {
+            moveVisualTemplateLayerToEdge(regionId, "front");
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onBringForward={(regionId) => {
+            moveVisualTemplateLayer(regionId, "up");
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onSendBackward={(regionId) => {
+            moveVisualTemplateLayer(regionId, "down");
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onSendToBack={(regionId) => {
+            moveVisualTemplateLayerToEdge(regionId, "back");
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onToggleHidden={(regionId) => {
+            const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+            if (region) updateVisualTemplateRegionMeta(regionId, { hidden: !region.hidden });
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onToggleLocked={(regionId) => {
+            const region = visualTemplateModel.regions.find((item) => item.id === regionId);
+            if (region) updateVisualTemplateRegionMeta(regionId, { locked: !region.locked });
+            setVisualTemplateLayerContextMenu(null);
+          }}
+          onDelete={(regionId) => {
+            deleteVisualTemplateContainer(regionId);
+            setVisualTemplateLayerContextMenu(null);
+          }}
         />
       )}
       {gitCommitContextMenu && (
@@ -17965,8 +22383,25 @@ function App() {
           }}
         />
       )}
+      {nodeBindingTemplateDialogOpen && (
+        <NodeBindingTemplateDialog
+          documentTypes={getAvailableAuthoringDocumentTypes().map((documentType) => ({
+            key: documentType,
+            label: getDocumentTypeLabel(documentType),
+          }))}
+          projectTree={projectTree}
+          templates={getSavedVisualTemplateCatalog()}
+          initialFolderId={getExplorerTargetFolderId()}
+          onCreate={(template, ditaBindingType, targetFolderId) => { void startNodeBindingTemplateFromSelection(template, ditaBindingType, targetFolderId); }}
+          onCreateFolder={(folderId) => createExplorerFolderNode(folderId, { edit: false, select: false })}
+          onDeleteFolder={(folderId) => { void deleteProjectItemById(folderId); }}
+          onRenameFolder={commitProjectItemRename}
+          onClose={() => setNodeBindingTemplateDialogOpen(false)}
+        />
+      )}
       {visualTemplateSaveAsOpen && (
         <VisualTemplateSaveAsDialog
+          fileTypeKey={getVisualTemplateSaveMetadata().ditaType}
           projectTree={projectTree}
           initialFolderId={getExplorerTargetFolderId()}
           suggestedFileName={getSuggestedVisualTemplateFileName()}
@@ -17987,6 +22422,15 @@ function App() {
         <VisualTemplateImportDialog
           onImport={startImportedVisualTemplate}
           onClose={() => setVisualTemplateImportOpen(false)}
+        />
+      )}
+      {visualTemplateAssetPickerOpen && (
+        <VisualTemplateAssetPickerDialog
+          assets={getVisualTemplateImageAssets()}
+          projectTree={projectTree}
+          onPreviewLoad={(asset) => previewVisualTemplateImageAsset(asset)}
+          onSelect={(asset) => { void applyVisualTemplateImageAsset(asset); }}
+          onClose={() => setVisualTemplateAssetPickerOpen(false)}
         />
       )}
       {toastNotifications.length > 0 && (
@@ -18022,11 +22466,16 @@ function App() {
 function ProjectContextMenu({
   contextMenu,
   projectTree,
+  clipboardNodeId,
+  clipboardMode,
+  selectedNodeCount = 1,
   onOpen,
   onNewFile,
   onNewFolder,
   onRename,
   onCopy,
+  onCut,
+  onPaste,
   onDelete,
   onCheckIn,
   onGitHistory,
@@ -18038,7 +22487,11 @@ function ProjectContextMenu({
   const node = findProjectNode(projectTree, contextMenu.nodeId)?.node;
   const isRoot = node?.id === "root";
   const isFile = node?.type === "file";
+  const hasMultiSelection = selectedNodeCount > 1;
   const label = node?.name || "Project";
+  const clipboardMatch = clipboardNodeId ? findProjectNode(projectTree, clipboardNodeId) : null;
+  const pasteDestination = getProjectPasteDestinationForTarget(projectTree, clipboardNodeId, contextMenu.nodeId, clipboardMode);
+  const canPaste = Boolean(clipboardMatch?.node && pasteDestination);
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -18069,18 +22522,20 @@ function ProjectContextMenu({
       role="menu"
       aria-label={`Explorer actions for ${label}`}
     >
-      {isFile && <ProjectMenuItem icon="open" label="Open" onClick={() => onOpen(contextMenu.nodeId)} />}
+      {isFile && <ProjectMenuItem icon="open" label="Open" disabled={hasMultiSelection} onClick={() => onOpen(contextMenu.nodeId)} />}
       <ProjectMenuItem icon="file" label="New File" onClick={() => onNewFile(contextMenu.nodeId)} />
       <ProjectMenuItem icon="folder" label="New Folder" onClick={() => onNewFolder(contextMenu.nodeId)} />
       <hr />
-      <ProjectMenuItem icon="rename" label="Rename" disabled={isRoot} onClick={() => onRename(contextMenu.nodeId)} />
-      <ProjectMenuItem icon="copy" label="Copy" disabled={isRoot} onClick={() => onCopy(contextMenu.nodeId)} />
-      {isFile && <ProjectMenuItem icon="check" label="Check in" onClick={() => onCheckIn(contextMenu.nodeId)} />}
-      {isFile && <ProjectMenuItem icon="history" label="Git History" onClick={() => onGitHistory(contextMenu.nodeId)} />}
+      <ProjectMenuItem icon="rename" label="Rename" disabled={isRoot || hasMultiSelection} onClick={() => onRename(contextMenu.nodeId)} />
+      <ProjectMenuItem icon="copy" label="Copy" disabled={isRoot || hasMultiSelection} onClick={() => onCopy(contextMenu.nodeId)} />
+      <ProjectMenuItem icon="cut" label="Cut" disabled={isRoot || hasMultiSelection} onClick={() => onCut(contextMenu.nodeId)} />
+      {canPaste && <ProjectMenuItem icon="paste" label="Paste" disabled={hasMultiSelection} onClick={() => onPaste(contextMenu.nodeId)} />}
+      {isFile && <ProjectMenuItem icon="check" label="Check in" disabled={hasMultiSelection} onClick={() => onCheckIn(contextMenu.nodeId)} />}
+      {isFile && <ProjectMenuItem icon="history" label="Git History" disabled={hasMultiSelection} onClick={() => onGitHistory(contextMenu.nodeId)} />}
       <hr />
-      <ProjectMenuItem icon="info" label="Properties" onClick={() => onProperties(contextMenu.nodeId)} />
+      <ProjectMenuItem icon="info" label="Properties" disabled={hasMultiSelection} onClick={() => onProperties(contextMenu.nodeId)} />
       <hr />
-      <ProjectMenuItem icon="delete" label="Delete" tone="danger" disabled={isRoot} onClick={() => onDelete(contextMenu.nodeId)} />
+      <ProjectMenuItem icon="delete" label={hasMultiSelection ? `Delete selected (${selectedNodeCount})` : "Delete"} tone="danger" disabled={isRoot} onClick={() => onDelete(contextMenu.nodeId)} />
     </div>
   );
 }
@@ -18152,6 +22607,72 @@ function ProjectMenuIcon({ type }) {
     );
   }
 
+  if (type === "cut") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <circle cx="6" cy="7" r="2.5" />
+        <circle cx="6" cy="17" r="2.5" />
+        <path d="M8.2 8.2 19 19" />
+        <path d="M8.2 15.8 19 5" />
+      </svg>
+    );
+  }
+
+  if (type === "paste") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M9 5h6l1 2h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2z" />
+        <path d="M9 5a3 3 0 0 1 6 0" />
+        <path d="M9 13h6" />
+        <path d="M12 10v6" />
+      </svg>
+    );
+  }
+
+  if (type === "bring-front") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M5 5h14" />
+        <path d="M12 18V8" />
+        <path d="m8.5 11.5 3.5-3.5 3.5 3.5" />
+        <path d="M7 19h10" />
+      </svg>
+    );
+  }
+
+  if (type === "bring-forward") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M7 17h10" />
+        <path d="M8.5 13h7" />
+        <path d="M12 11V5" />
+        <path d="m9 8 3-3 3 3" />
+      </svg>
+    );
+  }
+
+  if (type === "send-backward") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M7 7h10" />
+        <path d="M8.5 11h7" />
+        <path d="M12 13v6" />
+        <path d="m9 16 3 3 3-3" />
+      </svg>
+    );
+  }
+
+  if (type === "send-back") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M5 19h14" />
+        <path d="M12 6v10" />
+        <path d="m8.5 12.5 3.5 3.5 3.5-3.5" />
+        <path d="M7 5h10" />
+      </svg>
+    );
+  }
+
   if (type === "check") {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -18166,6 +22687,44 @@ function ProjectMenuIcon({ type }) {
         <path d="M4 12a8 8 0 1 0 2.35-5.65" />
         <path d="M4 5.5v4h4" />
         <path d="M12 8v4l3 2" />
+      </svg>
+    );
+  }
+
+  if (type === "show") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+        <circle cx="12" cy="12" r="2.5" />
+      </svg>
+    );
+  }
+
+  if (type === "hide") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M3 3l18 18" />
+        <path d="M10.6 10.6A2.5 2.5 0 0 0 13.4 13.4" />
+        <path d="M7.5 7.8C4.3 9.4 2.5 12 2.5 12s3.5 6 9.5 6a9.5 9.5 0 0 0 4.7-1.2" />
+        <path d="M12 6c6 0 9.5 6 9.5 6a14.5 14.5 0 0 1-2.2 2.7" />
+      </svg>
+    );
+  }
+
+  if (type === "lock") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </svg>
+    );
+  }
+
+  if (type === "unlock") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 7.5-2" />
       </svg>
     );
   }
@@ -18188,6 +22747,106 @@ function ProjectMenuIcon({ type }) {
       <path d="M14 11v5" />
       <path d="M7 7l1 13h8l1-13" />
     </svg>
+  );
+}
+
+function VisualTemplateLayerContextMenu({
+  contextMenu,
+  regions,
+  onRename,
+  onDuplicate,
+  onBringToFront,
+  onBringForward,
+  onSendBackward,
+  onSendToBack,
+  onToggleHidden,
+  onToggleLocked,
+  onDelete,
+}) {
+  const menuRef = useRef(null);
+  const [menuPosition, setMenuPosition] = useState(null);
+  const region = regions.find((item) => item.id === contextMenu.regionId);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+
+    const rect = menu.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.min(Math.max(contextMenu.x, margin), window.innerWidth - rect.width - margin);
+    const shouldOpenAbove = contextMenu.y + rect.height + margin > window.innerHeight;
+    const top = shouldOpenAbove
+      ? Math.max(margin, contextMenu.y - rect.height - 4)
+      : Math.min(contextMenu.y, window.innerHeight - rect.height - margin);
+
+    setMenuPosition({ x: left, y: top });
+  }, [contextMenu.x, contextMenu.y, contextMenu.regionId]);
+
+  if (!region) return null;
+
+  const layerLabel = region.label || (region.kind === "slot" ? "Slot" : "Container");
+  const siblings = regions
+    .filter((item) => (item.parentId || "") === (region.parentId || ""))
+    .sort((a, b) => normalizeVisualTemplateLayout(b.layout).zIndex - normalizeVisualTemplateLayout(a.layout).zIndex);
+  const stackIndex = siblings.findIndex((item) => item.id === region.id);
+  const canBringForward = stackIndex > 0;
+  const canSendBackward = stackIndex >= 0 && stackIndex < siblings.length - 1;
+
+  return (
+    <div
+      ref={menuRef}
+      className="tab-context-menu project-context-menu visual-layer-context-menu"
+      style={{
+        left: menuPosition?.x ?? contextMenu.x,
+        top: menuPosition?.y ?? contextMenu.y,
+        visibility: menuPosition ? "visible" : "hidden",
+      }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+      role="menu"
+      aria-label={`Layer actions for ${layerLabel}`}
+    >
+      <ProjectMenuItem icon="rename" label="Rename" onClick={() => onRename(contextMenu.regionId)} />
+      <ProjectMenuItem icon="copy" label="Duplicate" onClick={() => onDuplicate(contextMenu.regionId)} />
+      <hr />
+      <ProjectMenuItem
+        icon="bring-front"
+        label="Bring to Front"
+        disabled={!canBringForward}
+        onClick={() => onBringToFront(contextMenu.regionId)}
+      />
+      <ProjectMenuItem
+        icon="bring-forward"
+        label="Bring Forward"
+        disabled={!canBringForward}
+        onClick={() => onBringForward(contextMenu.regionId)}
+      />
+      <ProjectMenuItem
+        icon="send-backward"
+        label="Send Backward"
+        disabled={!canSendBackward}
+        onClick={() => onSendBackward(contextMenu.regionId)}
+      />
+      <ProjectMenuItem
+        icon="send-back"
+        label="Send to Back"
+        disabled={!canSendBackward}
+        onClick={() => onSendToBack(contextMenu.regionId)}
+      />
+      <hr />
+      <ProjectMenuItem
+        icon={region.hidden ? "show" : "hide"}
+        label={region.hidden ? "Show" : "Hide"}
+        onClick={() => onToggleHidden(contextMenu.regionId)}
+      />
+      <ProjectMenuItem
+        icon={region.locked ? "unlock" : "lock"}
+        label={region.locked ? "Unlock" : "Lock"}
+        onClick={() => onToggleLocked(contextMenu.regionId)}
+      />
+      <hr />
+      <ProjectMenuItem icon="delete" label="Delete" tone="danger" onClick={() => onDelete(contextMenu.regionId)} />
+    </div>
   );
 }
 
@@ -18239,126 +22898,7 @@ function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
   const [category, setCategory] = useState("All");
   const [selectedId, setSelectedId] = useState(mode === "create" ? "blank" : templates[0]?.id || "");
   const title = mode === "create" ? "New template" : "Open template";
-  const createTemplates = [
-    {
-      id: "blank",
-      name: "Blank",
-      description: "Start from scratch with an empty canvas.",
-      category: "Basic",
-      source: "blank",
-      available: true,
-      regions: [],
-      preview: "blank",
-    },
-    {
-      id: "basic",
-      name: "Basic",
-      description: "Hero, Body, Sidebar and Footer containers.",
-      category: "Basic",
-      source: "starter",
-      available: true,
-      regions: defaultVisualTemplateModel.regions,
-      preview: "basic",
-      badge: "Starter",
-    },
-    {
-      id: "article",
-      name: "Article",
-      description: "Single-column article with title and body.",
-      category: "Document",
-      source: "planned",
-      available: false,
-      preview: "article",
-    },
-    {
-      id: "two-column",
-      name: "Two Column",
-      description: "Split layout for side-by-side content.",
-      category: "Document",
-      source: "planned",
-      available: false,
-      preview: "two-column",
-    },
-    {
-      id: "cover-page",
-      name: "Cover Page",
-      description: "Title page with centered content and footer.",
-      category: "Document",
-      source: "planned",
-      available: false,
-      preview: "cover",
-    },
-    {
-      id: "reference",
-      name: "Reference",
-      description: "Structured reference topic with table rows.",
-      category: "DITA",
-      source: "planned",
-      available: false,
-      preview: "reference",
-      badge: "DITA",
-    },
-    {
-      id: "task",
-      name: "Task",
-      description: "Step-by-step task topic layout.",
-      category: "DITA",
-      source: "planned",
-      available: false,
-      preview: "task",
-      badge: "DITA",
-    },
-    {
-      id: "concept",
-      name: "Concept",
-      description: "Concept topic with icon and description.",
-      category: "DITA",
-      source: "planned",
-      available: false,
-      preview: "concept",
-      badge: "DITA",
-    },
-    {
-      id: "newsletter",
-      name: "Newsletter",
-      description: "Multi-column newsletter with hero and article blocks.",
-      category: "Newsletter",
-      source: "planned",
-      available: false,
-      preview: "newsletter",
-      badge: "New",
-    },
-    {
-      id: "email-newsletter",
-      name: "Email Newsletter",
-      description: "Single-column email layout with header and sections.",
-      category: "Newsletter",
-      source: "planned",
-      available: false,
-      preview: "email",
-      badge: "New",
-    },
-    {
-      id: "linkedin",
-      name: "LinkedIn Post",
-      description: "Professional post with image and caption.",
-      category: "Social Media",
-      source: "planned",
-      available: false,
-      preview: "linkedin",
-      badge: "Social",
-    },
-    {
-      id: "instagram",
-      name: "Instagram Post",
-      description: "Square 1:1 visual-first post layout.",
-      category: "Social Media",
-      source: "planned",
-      available: false,
-      preview: "instagram",
-      badge: "Social",
-    },
-  ];
+  const createTemplates = getCreateVisualTemplateOptions();
   const pickerTemplates = mode === "create"
     ? createTemplates
     : templates.map((template) => ({
@@ -18367,7 +22907,6 @@ function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
         available: true,
         preview: "basic",
       }));
-  const categories = ["All", "Basic", "Document", "DITA", "Newsletter", "Social Media"];
   const filteredTemplates = pickerTemplates.filter((template) => {
     const matchesCategory = category === "All" || template.category === category;
     const haystack = `${template.name} ${template.description} ${template.category}`.toLowerCase();
@@ -18428,7 +22967,7 @@ function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
             />
           </label>
           <div className="template-picker-categories" aria-label="Template categories">
-            {categories.map((item) => (
+            {visualTemplateCategories.map((item) => (
               <button
                 type="button"
                 key={item}
@@ -18486,22 +23025,202 @@ function VisualTemplatePickerDialog({ mode, templates, onSelect, onClose }) {
   );
 }
 
-function VisualTemplateSaveAsDialog({ projectTree, initialFolderId, suggestedFileName, onSave, onClose }) {
+function NodeBindingTemplateDialog({ documentTypes, projectTree, templates, initialFolderId, onCreate, onCreateFolder, onDeleteFolder, onRenameFolder, onClose }) {
+  const availableTemplates = templates.filter((template) => template.fileId || template.id);
+  const templateFiles = collectProjectFiles(projectTree)
+    .filter(({ node }) => node.type === "file" && node.ditaType === "visual-template")
+    .map(({ node, path }) => ({ node, path }));
+  const [selectedTemplateFileId, setSelectedTemplateFileId] = useState(availableTemplates[0]?.fileId || availableTemplates[0]?.id || "");
+  const initialTargetFolder = findProjectNode(projectTree, initialFolderId)?.node;
+  const [selectedTargetFolderId, setSelectedTargetFolderId] = useState(
+    initialTargetFolder?.type === "folder" ? initialTargetFolder.id : projectTree.id,
+  );
+  const [createdTargetFolderIds, setCreatedTargetFolderIds] = useState<Set<string>>(() => new Set());
+  const [editingTargetFolderId, setEditingTargetFolderId] = useState<string | null>(null);
+  const availableDocumentTypes = documentTypes?.length
+    ? documentTypes
+    : [
+        { key: "concept", label: "Concept" },
+        { key: "task", label: "Task" },
+        { key: "reference", label: "Reference" },
+        { key: "topic", label: "Topic" },
+        { key: "map", label: "Map" },
+      ];
+  const [ditaBindingType, setDitaBindingType] = useState(availableDocumentTypes.some((type) => type.key === "concept")
+    ? "concept"
+    : availableDocumentTypes[0]?.key || "topic");
+  const selectedTemplateFromCatalog = availableTemplates.find((template) => (
+    (template.fileId || template.id) === selectedTemplateFileId
+  ));
+  const selectedTemplateFile = templateFiles.find(({ node }) => node.id === selectedTemplateFileId);
+  const selectedTemplate = selectedTemplateFromCatalog || (selectedTemplateFile
+    ? {
+        id: selectedTemplateFile.node.id,
+        fileId: selectedTemplateFile.node.id,
+        name: selectedTemplateFile.node.name.replace(/\.af-template\.json$/i, ""),
+        description: "Reusable visual template saved in the workspace.",
+        source: "workspace",
+        filePath: selectedTemplateFile.path,
+        regions: [],
+      }
+    : null);
+  const selectedTargetFolder = findProjectNode(projectTree, selectedTargetFolderId)?.node;
+  const selectedTargetPath = selectedTargetFolder?.type === "folder"
+    ? normalizeProjectPath(selectedTargetFolder.githubPath || getProjectFilePath(projectTree, selectedTargetFolder.id).replace(/^content\//, "")) || "workspace root"
+    : "Select a folder";
+  const canCreate = Boolean(selectedTemplate && selectedTargetFolder?.type === "folder");
+
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-save-dialog node-binding-template-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create node-binding template"
+        onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header className="template-picker-header">
+          <div>
+            <strong>Create node-binding template</strong>
+            <p>Choose the DITA type, source visual template, and destination folder for the new binding template.</p>
+          </div>
+          <button type="button" aria-label="Close node-binding template dialog" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <div className="node-binding-template-form">
+          <label>
+            <span>DITA type</span>
+            <select value={ditaBindingType} onChange={(event) => setDitaBindingType(event.target.value)}>
+              {availableDocumentTypes.map((type) => (
+                <option key={type.key} value={type.key}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="node-binding-template-panes">
+            <section className="node-binding-template-pane">
+              <header>
+                <strong>Templates</strong>
+                <span>Visual template files</span>
+              </header>
+              <MiniExplorerTree
+                fileTypes={["visual-template"]}
+                getFileType={(node) => node.ditaType || ""}
+                getNodePath={(_node, pathParts) => getProjectNodePath(pathParts)}
+                projectTree={projectTree}
+                selectedFileId={selectedTemplateFileId}
+                onSelectFile={(node) => {
+                  setSelectedTemplateFileId(node.id);
+                }}
+              />
+            </section>
+            <section className="node-binding-template-pane">
+              <header>
+                <div>
+                  <strong>Targets</strong>
+                  <span>Save location</span>
+                </div>
+                <div className="node-binding-target-actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      const folder = onCreateFolder?.(selectedTargetFolderId);
+                      if (folder?.id) {
+                        setCreatedTargetFolderIds((current) => new Set(current).add(folder.id));
+                        setSelectedTargetFolderId(folder.id);
+                        setEditingTargetFolderId(folder.id);
+                      }
+                    }}
+                  >
+                    New Folder
+                  </button>
+                </div>
+              </header>
+              <MiniExplorerTree
+                editingFolderId={editingTargetFolderId}
+                deletableFolderIds={[...createdTargetFolderIds]}
+                editableFolderIds={[...createdTargetFolderIds]}
+                mode="folders"
+                getNodePath={(_node, pathParts) => getProjectNodePath(pathParts)}
+                onCancelFolderRename={() => setEditingTargetFolderId(null)}
+                onCommitFolderRename={(nodeId, nextName) => {
+                  onRenameFolder?.(nodeId, nextName);
+                  setEditingTargetFolderId(null);
+                }}
+                onDeleteFolder={(node) => {
+                  const parentId = findProjectNode(projectTree, node.id)?.parent?.id || projectTree.id;
+                  onDeleteFolder?.(node.id);
+                  setCreatedTargetFolderIds((current) => {
+                    const next = new Set(current);
+                    next.delete(node.id);
+                    return next;
+                  });
+                  setEditingTargetFolderId(null);
+                  setSelectedTargetFolderId(parentId);
+                }}
+                projectTree={projectTree}
+                selectedFolderId={selectedTargetFolderId}
+                onSelectFolder={(node) => setSelectedTargetFolderId(node.id)}
+                onStartFolderRename={(nodeId) => setEditingTargetFolderId(nodeId)}
+              />
+              <small className="node-binding-target-path">Target: {selectedTargetPath}</small>
+            </section>
+          </div>
+          {selectedTemplate ? (
+            <div className="node-binding-template-summary">
+              <strong>{selectedTemplate.name}</strong>
+              <p>{selectedTemplate.description || "Reusable visual template."}</p>
+              <small>
+                {selectedTemplateFromCatalog
+                  ? `${selectedTemplateFromCatalog.regions.length} container/slot regions`
+                  : "Will load template content when created"}
+                {selectedTemplate.isCurrent ? " · current canvas" : ""}
+              </small>
+            </div>
+          ) : (
+            <div className="template-picker-empty">Save a visual template before creating a node-binding template.</div>
+          )}
+        </div>
+        <footer className="template-picker-footer">
+          <div>
+            <span className="template-picker-dot" aria-hidden="true" />
+            <strong>{selectedTemplate?.name || "No template"}</strong>
+            <span>{canCreate ? `${ditaBindingType} binding rules` : "visual template required"}</span>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!canCreate}
+            onClick={() => selectedTemplate && onCreate(selectedTemplate, ditaBindingType, selectedTargetFolderId)}
+          >
+            Create node template
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function VisualTemplateSaveAsDialog({ fileTypeKey = "visual-template", projectTree, initialFolderId, suggestedFileName, onSave, onClose }) {
   const folders = collectVisualTemplateFolders(projectTree);
   const fallbackFolderId = folders.find((folder) => folder.path === "content")?.id || folders[0]?.id || projectTree.id;
   const initialFolderExists = folders.some((folder) => folder.id === initialFolderId);
   const [selectedFolderId, setSelectedFolderId] = useState(initialFolderExists ? initialFolderId : fallbackFolderId);
   const [fileName, setFileName] = useState(suggestedFileName || "visual-template.af-template.json");
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) || folders[0];
-  const normalizedFileName = normalizeFileName(fileName || "visual-template", "visual-template");
+  const normalizedFileName = normalizeFileName(fileName || fileTypeKey || "visual-template", fileTypeKey);
   const selectedFolderNode = selectedFolder ? findProjectNode(projectTree, selectedFolder.id)?.node : null;
   const duplicateName = Boolean(selectedFolderNode?.children?.some((child) => (
     child.type === "file"
     && !child.deletedAt
     && String(child.name || "").toLowerCase() === normalizedFileName.toLowerCase()
   )));
-  const canSave = Boolean(selectedFolder && normalizedFileName.trim() && !duplicateName);
   const targetPath = selectedFolder ? getGitHubChildPath(selectedFolder.node, normalizedFileName) || normalizedFileName : normalizedFileName;
+  const targetPathMessage = getProjectPathGuardMessage(targetPath);
+  const canSave = Boolean(selectedFolder && normalizedFileName.trim() && !duplicateName && !targetPathMessage);
 
   return (
     <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
@@ -18528,7 +23247,7 @@ function VisualTemplateSaveAsDialog({ projectTree, initialFolderId, suggestedFil
             <input
               type="text"
               value={fileName}
-              onChange={(event) => setFileName(event.target.value)}
+              onChange={(event) => setFileName(sanitizeProjectItemName(event.target.value, { allowEmpty: true, trimTrailingUnsafe: false }))}
               onBlur={() => setFileName(normalizedFileName)}
               autoFocus
             />
@@ -18550,8 +23269,8 @@ function VisualTemplateSaveAsDialog({ projectTree, initialFolderId, suggestedFil
               ))}
             </div>
           </section>
-          <div className={`template-save-preview${duplicateName ? " error" : ""}`}>
-            <span>{duplicateName ? "A file with this name already exists." : "Will be saved as"}</span>
+          <div className={`template-save-preview${duplicateName || targetPathMessage ? " error" : ""}`}>
+            <span>{duplicateName ? "A file with this name already exists." : targetPathMessage || "Will be saved as"}</span>
             <strong>{duplicateName ? normalizedFileName : targetPath}</strong>
           </div>
         </div>
@@ -18701,6 +23420,216 @@ function VisualTemplateImportDialog({ onImport, onClose }) {
   );
 }
 
+function VisualTemplateAssetPickerDialog({ assets, projectTree, onPreviewLoad, onSelect, onClose }) {
+  const [query, setQuery] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState("all");
+  const [includeSubfolders, setIncludeSubfolders] = useState(true);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [previewHrefsById, setPreviewHrefsById] = useState({});
+  const [previewLoadingId, setPreviewLoadingId] = useState("");
+  const normalizedQuery = normalizeSearchText(query);
+  const folderPaths = collectProjectFolders(projectTree)
+    .map(({ path }) => normalizeProjectPath(path))
+    .filter((path) => path && assets.some((asset) => normalizeProjectPath(asset.path).startsWith(`${path}/`) || normalizeProjectPath(asset.path) === path))
+    .sort((left, right) => {
+      const leftPreferred = /(^|\/)assets?$/i.test(left) ? -1 : 0;
+      const rightPreferred = /(^|\/)assets?$/i.test(right) ? -1 : 0;
+      if (leftPreferred !== rightPreferred) return leftPreferred - rightPreferred;
+      return left.localeCompare(right);
+    });
+  const folders = ["all", ...folderPaths];
+  const selectedFolderPath = selectedFolder === "all" ? "" : selectedFolder;
+  const folderFilteredAssets = assets.filter((asset) => {
+    if (!selectedFolderPath) return true;
+    const assetFolder = normalizeProjectPath(asset.path).split("/").slice(0, -1).join("/");
+    return includeSubfolders
+      ? assetFolder === selectedFolderPath || assetFolder.startsWith(`${selectedFolderPath}/`)
+      : assetFolder === selectedFolderPath;
+  });
+  const filteredAssets = folderFilteredAssets.filter((asset) => (
+    !normalizedQuery || normalizeSearchText(`${asset.name} ${asset.path}`).includes(normalizedQuery)
+  ));
+  const visibleLimit = 60;
+  const visibleAssets = filteredAssets.slice(0, visibleLimit);
+  const selectedAsset = visibleAssets.find((asset) => asset.id === selectedAssetId) || visibleAssets[0] || null;
+  const selectedPreviewHref = selectedAsset ? previewHrefsById[selectedAsset.id] || selectedAsset.previewHref || "" : "";
+  const previewAsset = selectedAsset ? { ...selectedAsset, previewHref: selectedPreviewHref } : null;
+
+  async function selectAssetForPreview(asset) {
+    setSelectedAssetId(asset.id);
+    if (asset.previewHref || previewHrefsById[asset.id] || !onPreviewLoad) return;
+
+    setPreviewLoadingId(asset.id);
+    try {
+      const previewHref = await onPreviewLoad(asset);
+      if (previewHref) {
+        setPreviewHrefsById((current) => ({
+          ...current,
+          [asset.id]: previewHref,
+        }));
+      }
+    } finally {
+      setPreviewLoadingId((currentId) => (currentId === asset.id ? "" : currentId));
+    }
+  }
+
+  return (
+    <div className="template-picker-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="template-picker-dialog visual-asset-picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Pick image asset"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="template-picker-header">
+          <div>
+            <strong>Pick Image</strong>
+            <p>Select an image from the Explorer assets.</p>
+          </div>
+          <button type="button" aria-label="Close image picker" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <div className="template-picker-filters">
+          <label className="template-picker-search">
+            <SearchIcon />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search images..."
+              aria-label="Search image assets"
+              autoFocus
+            />
+          </label>
+        </div>
+        <div className="visual-asset-picker-browser">
+          <aside className="visual-asset-folder-list" aria-label="Image folders">
+            {folders.map((folderPath) => {
+              const label = folderPath === "all" ? "All images" : folderPath.split("/").pop() || folderPath;
+              const count = folderPath === "all"
+                ? assets.length
+                : assets.filter((asset) => {
+                    const assetFolder = normalizeProjectPath(asset.path).split("/").slice(0, -1).join("/");
+                    return assetFolder === folderPath || assetFolder.startsWith(`${folderPath}/`);
+                  }).length;
+              return (
+                <button
+                  type="button"
+                  key={folderPath}
+                  className={selectedFolder === folderPath ? "active" : ""}
+                  onClick={() => setSelectedFolder(folderPath)}
+                >
+                  <FolderFileIcon />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{folderPath === "all" ? "Project" : folderPath}</small>
+                  </span>
+                  <em>{count}</em>
+                </button>
+              );
+            })}
+          </aside>
+          <section className="visual-asset-picker-results">
+            <label className="visual-asset-picker-toggle">
+              <input
+                type="checkbox"
+                checked={includeSubfolders}
+                disabled={selectedFolder === "all"}
+                onChange={(event) => setIncludeSubfolders(event.target.checked)}
+              />
+              <span>Include subfolders</span>
+            </label>
+            <div className="visual-asset-picker-list" role="listbox" aria-label="Image assets">
+              {visibleAssets.map((asset) => {
+                const isSelected = selectedAsset?.id === asset.id;
+                const previewHref = previewHrefsById[asset.id] || asset.previewHref || "";
+                const isLoadingPreview = previewLoadingId === asset.id;
+                return (
+                  <button
+                    type="button"
+                    key={asset.id}
+                    className={`visual-asset-picker-item${isSelected ? " active" : ""}${isLoadingPreview ? " loading" : ""}`}
+                    aria-selected={isSelected}
+                    onClick={() => { void selectAssetForPreview(asset); }}
+                    onDoubleClick={() => onSelect(asset)}
+                  >
+                    <span className="visual-asset-picker-thumb" aria-hidden="true">
+                      {previewHref ? <img src={previewHref} alt="" /> : <FileTypeIcon kind="image" />}
+                    </span>
+                    <span>
+                      <strong>{asset.name}</strong>
+                      <small>{isLoadingPreview ? "Loading preview..." : asset.path}</small>
+                    </span>
+                  </button>
+                );
+              })}
+              {!filteredAssets.length && (
+                <div className="template-picker-empty">
+                  {assets.length ? "No images match this folder or search." : "No image assets found in Explorer."}
+                </div>
+              )}
+            </div>
+          </section>
+          <aside className="visual-asset-preview-panel" aria-label="Selected image preview">
+            {previewAsset ? (
+              <>
+                <div className="visual-asset-preview-frame">
+                  {previewLoadingId === previewAsset.id && !previewAsset.previewHref ? (
+                    <span className="visual-asset-preview-loading">Loading preview...</span>
+                  ) : previewAsset.previewHref ? (
+                    <img src={previewAsset.previewHref} alt={previewAsset.name} />
+                  ) : (
+                    <FileTypeIcon kind="image" />
+                  )}
+                </div>
+                <div className="visual-asset-preview-details">
+                  <strong>{previewAsset.name}</strong>
+                  <small>{previewAsset.path}</small>
+                  <dl>
+                    <div>
+                      <dt>CSS path</dt>
+                      <dd>{previewAsset.href}</dd>
+                    </div>
+                    <div>
+                      <dt>Folder</dt>
+                      <dd>{normalizeProjectPath(previewAsset.path).split("/").slice(0, -1).join("/") || "Project root"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </>
+            ) : (
+              <div className="template-picker-empty">
+                Select an image to preview it here.
+              </div>
+            )}
+          </aside>
+        </div>
+        <footer className="template-picker-footer">
+          <div>
+            <span className="template-picker-dot" aria-hidden="true" />
+            <strong>
+              Showing {visibleAssets.length} of {filteredAssets.length} image{filteredAssets.length === 1 ? "" : "s"}
+            </strong>
+          </div>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!selectedAsset}
+            onClick={() => {
+              if (previewAsset) onSelect(previewAsset);
+            }}
+          >
+            Apply
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function ProjectPropertiesPopup({ nodeId, projectTree, fileHistories, onClose }) {
   const match = findProjectNode(projectTree, nodeId);
   const node = match?.node;
@@ -18767,6 +23696,7 @@ function TabContextMenu({
   hasBottomPane,
   hasSecondaryPane,
   sourcePaneTabCount,
+  isTemplateTab,
   fileName,
   onClose,
   onCloseTab,
@@ -18780,10 +23710,17 @@ function TabContextMenu({
   onMoveRight,
   onMoveBottom,
 }) {
+  const splitDisabled = sourcePaneTabCount <= 1;
+  const splitDisabledTitle = splitDisabled
+    ? "Open another tab before splitting this pane."
+    : isTemplateTab
+    ? "Template tabs should be moved into a split pane, not duplicated."
+    : undefined;
   return (
     <div
       className="tab-context-menu"
       style={{ left: contextMenu.x, top: contextMenu.y }}
+      onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
       role="menu"
@@ -18795,19 +23732,33 @@ function TabContextMenu({
       <hr />
       {!hasSecondaryPane ? (
         <>
-          <button type="button" onClick={onSplitRight}>Split Right</button>
-          <button type="button" onClick={onSplitDown}>Split Down</button>
+          <button
+            type="button"
+            disabled={splitDisabled || isTemplateTab}
+            title={splitDisabledTitle}
+            onClick={onSplitRight}
+          >
+            Split Right
+          </button>
+          <button
+            type="button"
+            disabled={splitDisabled || isTemplateTab}
+            title={splitDisabledTitle}
+            onClick={onSplitDown}
+          >
+            Split Down
+          </button>
           <div className="context-submenu">
             <button
               type="button"
-              disabled={sourcePaneTabCount <= 1}
-              title={sourcePaneTabCount <= 1 ? "Open another tab before moving this tab into a new pane." : undefined}
+              disabled={splitDisabled}
+              title={splitDisabled ? splitDisabledTitle : undefined}
               aria-haspopup="menu"
             >
               Split &amp; Move
               <span aria-hidden="true">›</span>
             </button>
-            {sourcePaneTabCount > 1 && (
+            {!splitDisabled && (
               <div className="context-submenu-panel" role="menu" aria-label="Split and move direction">
                 <button type="button" onClick={onSplitAndMoveRight}>Right</button>
                 <button type="button" onClick={onSplitAndMoveDown}>Down</button>
@@ -19067,6 +24018,36 @@ function FileTypeIcon({ kind }) {
         <path d="M7 11h4" />
         <rect x="7" y="13" width="4" height="3" rx=".6" />
         <rect x="13" y="13" width="4" height="3" rx=".6" />
+      </svg>
+    );
+  }
+
+  if (kind === "visual-template-binding") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M7 8h5" />
+        <path d="M7 12h4" />
+        <path d="M14 9h3" />
+        <path d="M14 15h3" />
+        <path d="m10.5 12 3.5-3" />
+        <path d="m10.5 12 3.5 3" />
+      </svg>
+    );
+  }
+
+  if (kind === "node-binding-template") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M8 9h8" />
+        <path d="M8 15h8" />
+        <path d="M8 9v6" />
+        <path d="M16 9v6" />
+        <circle cx="8" cy="9" r="1.4" />
+        <circle cx="16" cy="9" r="1.4" />
+        <circle cx="8" cy="15" r="1.4" />
+        <circle cx="16" cy="15" r="1.4" />
       </svg>
     );
   }
@@ -19583,6 +24564,19 @@ function TemplateBindingsIcon() {
   );
 }
 
+function OpenSourceTemplateIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="4" y="4.5" width="10.5" height="15" rx="2" />
+      <path d="M7.5 8.5h4" />
+      <path d="M7.5 12h3" />
+      <path d="M13.5 10.5h6v6" />
+      <path d="m12.5 17.5 7-7" />
+      <path d="M16 4.5h2a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
 function TemplateLayersIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -19638,8 +24632,10 @@ function RedoArrowIcon() {
 function EyeIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
-      <path d="M3.5 12s3.2-5.5 8.5-5.5 8.5 5.5 8.5 5.5-3.2 5.5-8.5 5.5S3.5 12 3.5 12z" />
-      <circle cx="12" cy="12" r="2.2" />
+      <path d="M3 12s3.4-6 9-6 9 6 9 6-3.4 6-9 6-9-6-9-6z" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 9.2v5.6" />
+      <path d="M9.2 12h5.6" />
     </svg>
   );
 }
@@ -19674,6 +24670,15 @@ function UnlockIcon() {
   );
 }
 
+function DuplicateIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="8" y="8" width="10" height="10" rx="2" />
+      <path d="M6 14H5.8A1.8 1.8 0 0 1 4 12.2V5.8A1.8 1.8 0 0 1 5.8 4h6.4A1.8 1.8 0 0 1 14 5.8V6" />
+    </svg>
+  );
+}
+
 function TrashIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -19682,6 +24687,20 @@ function TrashIcon() {
       <path d="M6.5 7 7.4 19a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8L17.5 7" />
       <path d="M10 11v6" />
       <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function ClearCanvasIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4.5 7h8" />
+      <path d="M4.5 12h15" />
+      <path d="M4.5 17h10" />
+      <path d="m16 6.5 3.5 3.5" />
+      <path d="m19.5 6.5-3.5 3.5" />
+      <path d="m17.5 15 3 3" />
+      <path d="m20.5 15-3 3" />
     </svg>
   );
 }
@@ -19771,6 +24790,7 @@ function InspectorPanel({
   selectedPath,
   childOptions,
   siblingOptions,
+  styleClasses = [],
   hrefValidation,
   onClose,
   onInsert,
@@ -19818,6 +24838,7 @@ function InspectorPanel({
             attributeDefinitions={attributeDefinitions}
             filter={attributeFilter}
             validationByName={validationByName}
+            styleClasses={styleClasses}
             onFilterChange={setAttributeFilter}
             onChange={onUpdateAttribute}
             onBlur={onAttributeBlur}
@@ -19967,6 +24988,7 @@ function InspectorAttributeTable({
   attributeDefinitions,
   filter,
   validationByName = {},
+  styleClasses = [],
   onFilterChange,
   onChange,
   onBlur,
@@ -19994,7 +25016,15 @@ function InspectorAttributeTable({
         <div className="inspector-attribute-table" role="table" aria-label={`Attributes for ${node.tagName}`}>
           {filteredAttributes.map((attribute) => {
             const value = node.getAttribute(attribute.name) || "";
-            const optionValues = getContextualAttributeValues(doc, selectedPath, attribute.name) || attribute.values || [];
+            const contextualValues = getContextualAttributeValues(doc, selectedPath, attribute.name) || attribute.values || [];
+            const styleClassValues = attribute.name === "outputclass"
+              ? styleClasses
+                .filter((styleClass: StyleClass) => styleClass.appliesTo === "dita" || styleClass.appliesTo === "both")
+                .map((styleClass: StyleClass) => styleClass.key)
+              : [];
+            const optionValues = attribute.name === "outputclass" && styleClassValues.length
+              ? Array.from(new Set([...(value ? [value] : []), ...styleClassValues]))
+              : contextualValues;
             return (
               <label className="inspector-attribute-row" key={attribute.name} role="row">
                 <span className="inspector-attribute-name" role="cell">{attribute.label || attribute.name}</span>
@@ -21348,7 +26378,7 @@ function projectNodeContainsId(node, id) {
 }
 
 function ProjectNodeNameEditor({ name, onCommit, onCancel }) {
-  const [draft, setDraft] = useState(name);
+  const [draft, setDraft] = useState(sanitizeProjectItemName(name, { fallback: "Untitled" }));
   const inputRef = useRef(null);
   const finishedRef = useRef(false);
 
@@ -21363,7 +26393,7 @@ function ProjectNodeNameEditor({ name, onCommit, onCancel }) {
       className="project-node-name-editor"
       aria-label="Edit name"
       value={draft}
-      onChange={(event) => setDraft(event.target.value)}
+      onChange={(event) => setDraft(sanitizeProjectItemName(event.target.value, { allowEmpty: true, trimTrailingUnsafe: false }))}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -21371,14 +26401,14 @@ function ProjectNodeNameEditor({ name, onCommit, onCancel }) {
       onBlur={() => {
         if (finishedRef.current) return;
         finishedRef.current = true;
-        onCommit(draft);
+        onCommit(sanitizeProjectItemName(draft, { fallback: name }));
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.preventDefault();
           if (finishedRef.current) return;
           finishedRef.current = true;
-          onCommit(draft);
+          onCommit(sanitizeProjectItemName(draft, { fallback: name }));
         }
 
         if (event.key === "Escape") {
@@ -21395,6 +26425,7 @@ function ProjectTreeNode({
   node,
   activeFileId,
   selectedProjectId,
+  selectedProjectIds,
   onSelect,
   onOpenFile,
   editingNodeId,
@@ -21402,6 +26433,10 @@ function ProjectTreeNode({
   onCancelRename,
   onOpenContextMenu,
   onMove,
+  onImportFiles,
+  cutNodeId,
+  draggingProjectNodeId,
+  onDraggingProjectNodeChange,
   dropTarget,
   onDropTargetChange,
   query = "",
@@ -21409,8 +26444,9 @@ function ProjectTreeNode({
   depth = 0,
   pathParts = [],
 }) {
-  const selected = node.id === selectedProjectId;
+  const selected = selectedProjectIds?.has(node.id) || node.id === selectedProjectId;
   const active = node.id === activeFileId;
+  const pendingCut = node.id === cutNodeId;
   const currentPathParts = [...pathParts, node.name];
   const projectPath = getProjectNodePath(currentPathParts);
   const dragHref = projectPath;
@@ -21423,38 +26459,146 @@ function ProjectTreeNode({
     : [];
   const canExpand = node.type === "folder" && visibleChildren.length > 0;
   const iconKind = node.type === "folder" ? "folder" : getProjectFileIconKind(node);
-  const [expanded, setExpanded] = useState(node.id === "root" || depth < 2);
+  const [expanded, setExpanded] = useState(node.id === "root");
   const showChildren = canExpand && (expanded || isSearchActive);
 
   useEffect(() => {
-    if (canExpand && selectedProjectId && projectNodeContainsId(node, selectedProjectId)) {
+    if (canExpand && selectedProjectId && selectedProjectId !== node.id && projectNodeContainsId(node, selectedProjectId)) {
       setExpanded(true);
     }
   }, [canExpand, node, selectedProjectId]);
 
   if ((node.deletedAt && node.id !== "root") || !visible) return null;
 
+  function getProjectRowElement(event) {
+    const currentTarget = event.currentTarget;
+    return currentTarget.querySelector(":scope > button") || currentTarget;
+  }
+
   function getDropPlacement(event) {
+    const rowElement = getProjectRowElement(event);
     if (node.type === "folder") {
-      const rect = event.currentTarget.getBoundingClientRect();
+      const rect = rowElement.getBoundingClientRect();
       const offset = event.clientY - rect.top;
       if (offset < rect.height * 0.25) return "before";
       if (offset > rect.height * 0.75) return "after";
       return "inside";
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
+    const rect = rowElement.getBoundingClientRect();
     return event.clientY - rect.top < rect.height / 2 ? "before" : "after";
   }
 
+  function hasExternalFileDrag(event) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function hasInternalProjectDrag(event) {
+    return Boolean(draggingProjectNodeId) ||
+      Array.from(event.dataTransfer.types).includes("application/x-xml-editor-project-node");
+  }
+
+  function getProjectDropRowFromPoint(event) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const row = element instanceof HTMLElement
+      ? element.closest("[data-project-node-id]")
+      : null;
+    if (!(row instanceof HTMLElement)) return null;
+    return {
+      nodeId: row.dataset.projectNodeId || "",
+      nodeType: row.dataset.projectNodeType || "",
+    };
+  }
+
+  function getExternalFileDropTarget(event) {
+    const row = getProjectDropRowFromPoint(event);
+    return row?.nodeId
+      ? {
+          nodeId: row.nodeId,
+          placement: row.nodeType === "folder" ? "inside" : getDropPlacement(event),
+        }
+      : {
+          nodeId: node.id,
+          placement: node.type === "folder" ? "inside" : getDropPlacement(event),
+        };
+  }
+
+  function getInternalProjectDropTarget(event) {
+    const row = getProjectDropRowFromPoint(event);
+    return row?.nodeId
+      ? {
+          nodeId: row.nodeId,
+          placement: row.nodeType === "folder" ? "inside" : getDropPlacement(event),
+        }
+      : {
+          nodeId: node.id,
+          placement: node.type === "folder" ? "inside" : getDropPlacement(event),
+        };
+  }
+
+  function handleProjectNodeDragOver(event) {
+    if (hasExternalFileDrag(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = getExternalFileDropTarget(event);
+      event.dataTransfer.dropEffect = "copy";
+      onDropTargetChange(target);
+      return;
+    }
+
+    if (!hasInternalProjectDrag(event)) return;
+    const draggedNodeId = draggingProjectNodeId || event.dataTransfer.getData("application/x-xml-editor-project-node");
+    if (draggedNodeId === node.id) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const target = getInternalProjectDropTarget(event);
+    event.dataTransfer.dropEffect = "move";
+    onDropTargetChange(target);
+  }
+
+  function handleProjectNodeDrop(event) {
+    if (event.dataTransfer.files?.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = getExternalFileDropTarget(event);
+      onImportFiles(event.dataTransfer.files, target.nodeId, target.placement);
+      onDropTargetChange(null);
+      return;
+    }
+
+    const draggedNodeId = draggingProjectNodeId || event.dataTransfer.getData("application/x-xml-editor-project-node");
+    if (!draggedNodeId || draggedNodeId === node.id) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const target = getInternalProjectDropTarget(event);
+    onMove(draggedNodeId, target.nodeId, target.placement);
+    onDropTargetChange(null);
+  }
+
   return (
-    <div className={`project-node${matched && query.trim() ? " search-match" : ""}${dropPlacement ? ` drop-${dropPlacement}` : ""}`} style={{ "--depth": depth } as React.CSSProperties}>
+    <div
+      className={`project-node${matched && query.trim() ? " search-match" : ""}${dropPlacement ? ` drop-${dropPlacement}` : ""}${pendingCut ? " pending-cut" : ""}`}
+      data-project-node-id={node.id}
+      data-project-node-type={node.type}
+      onDragOver={handleProjectNodeDragOver}
+      onDragLeave={() => {
+        if (dropTarget?.nodeId === node.id) {
+          onDropTargetChange(null);
+        }
+      }}
+      onDrop={handleProjectNodeDrop}
+      onDragEnd={() => onDropTargetChange(null)}
+      style={{ "--depth": depth } as React.CSSProperties}
+    >
       <button
         className={`${selected ? "selected" : ""} ${active ? "active-file" : ""}`}
         draggable={node.id !== "root" && editingNodeId !== node.id}
         onDragStart={(event) => {
           if (node.id === "root") return;
 
+          onDraggingProjectNodeChange(node.id);
           event.dataTransfer.effectAllowed = node.type === "file" ? "copyMove" : "move";
           event.dataTransfer.setData("application/x-xml-editor-project-node", node.id);
           if (node.type === "file") {
@@ -21470,35 +26614,14 @@ function ProjectTreeNode({
             }));
           }
         }}
-        onDragOver={(event) => {
-          const draggedNodeId = event.dataTransfer.getData("application/x-xml-editor-project-node");
-          if (!draggedNodeId || draggedNodeId === node.id) return;
-
-          event.preventDefault();
-          const placement = getDropPlacement(event);
-          event.dataTransfer.dropEffect = "move";
-          onDropTargetChange({ nodeId: node.id, placement });
-        }}
-        onDragLeave={() => {
-          if (dropTarget?.nodeId === node.id) {
-            onDropTargetChange(null);
-          }
-        }}
-        onDrop={(event) => {
-          const draggedNodeId = event.dataTransfer.getData("application/x-xml-editor-project-node");
-          if (!draggedNodeId || draggedNodeId === node.id) return;
-
-          event.preventDefault();
-          event.stopPropagation();
-          const placement = dropTarget?.nodeId === node.id ? dropTarget.placement : getDropPlacement(event);
-          onMove(draggedNodeId, node.id, placement);
+        onDragEnd={() => {
+          onDraggingProjectNodeChange("");
           onDropTargetChange(null);
         }}
-        onDragEnd={() => onDropTargetChange(null)}
         aria-expanded={canExpand ? showChildren : undefined}
-        onClick={() => {
-          onSelect(node.id);
-          if (canExpand && !isSearchActive) {
+        onClick={(event) => {
+          onSelect(node.id, event);
+          if (canExpand && !isSearchActive && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
             setExpanded((current) => !current);
           }
         }}
@@ -21531,6 +26654,7 @@ function ProjectTreeNode({
               node={child}
               activeFileId={activeFileId}
               selectedProjectId={selectedProjectId}
+              selectedProjectIds={selectedProjectIds}
               onSelect={onSelect}
               onOpenFile={onOpenFile}
               editingNodeId={editingNodeId}
@@ -21538,6 +26662,10 @@ function ProjectTreeNode({
               onCancelRename={onCancelRename}
               onOpenContextMenu={onOpenContextMenu}
               onMove={onMove}
+              onImportFiles={onImportFiles}
+              cutNodeId={cutNodeId}
+              draggingProjectNodeId={draggingProjectNodeId}
+              onDraggingProjectNodeChange={onDraggingProjectNodeChange}
               dropTarget={dropTarget}
               onDropTargetChange={onDropTargetChange}
               query={query}

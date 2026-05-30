@@ -59,7 +59,7 @@ export async function completeGitHubOAuth({ code, state }) {
       redirect_uri: githubOAuthCallbackUrl,
     }),
   });
-  const tokenBody = await tokenResponse.json();
+  const tokenBody = await readResponseJson(tokenResponse);
 
   if (!tokenResponse.ok || tokenBody.error || !tokenBody.access_token) {
     throw Object.assign(new Error(tokenBody.error_description || tokenBody.error || "GitHub did not return an access token."), {
@@ -225,6 +225,32 @@ export async function getGitHubRepositoryTree(userId) {
     }));
   await enrichDitaEntryTypes(entries, connection.access_token, repository.full_name);
   const sync = await syncGitHubTreeMetadata(userId, repository, entries);
+  if (sync?.projectId) {
+    const localEntries = await query(
+      `
+        select path, kind, dita_type, github_sha, size_bytes
+        from project_files
+        where project_id = $1
+          and deleted_at is null
+        order by path
+      `,
+      [sync.projectId],
+    );
+    const entriesByPath = new Map(entries.map((entry) => [normalizeGitHubPath(entry.path), entry]));
+
+    localEntries.rows.forEach((row) => {
+      const normalizedPath = normalizeGitHubPath(row.path);
+      if (!normalizedPath || entriesByPath.has(normalizedPath)) return;
+
+      entries.push({
+        path: normalizedPath,
+        type: row.kind === "folder" ? "folder" : "file",
+        ditaType: row.dita_type || undefined,
+        sha: row.github_sha || "",
+        size: Number(row.size_bytes || 0),
+      });
+    });
+  }
 
   return {
     repository,
@@ -280,6 +306,38 @@ export async function getGitHubFileContentAtRef(userId, { filePath, ref } = {}) 
 
 function hashContent(value) {
   return crypto.createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
+}
+
+function getDataUrlBlobPayload(contentText) {
+  const match = String(contentText || "").match(/^data:([^;,]+)?;base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) return null;
+
+  const base64 = match[2].replace(/\s/g, "");
+  return {
+    content: base64,
+    encoding: "base64",
+    sizeBytes: Buffer.byteLength(base64, "base64"),
+  };
+}
+
+async function createGitHubBlobFromDraft({ repositoryName, accessToken, contentText }) {
+  const dataUrlPayload = getDataUrlBlobPayload(contentText);
+  const body = dataUrlPayload
+    ? { content: dataUrlPayload.content, encoding: dataUrlPayload.encoding }
+    : { content: contentText, encoding: "utf-8" };
+  const blob = await fetchGitHubJson(
+    `/repos/${repositoryName}/git/blobs`,
+    accessToken,
+    {
+      method: "POST",
+      body,
+    },
+  );
+
+  return {
+    blob,
+    sizeBytes: dataUrlPayload?.sizeBytes ?? Buffer.byteLength(contentText, "utf8"),
+  };
 }
 
 function assertPublishableContent(filePath, contentFormat, contentText) {
@@ -535,17 +593,11 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
     }
     assertPublishableContent(filePath, draft.content_format, contentText);
 
-    const blob = await fetchGitHubJson(
-      `/repos/${repositoryName}/git/blobs`,
-      connection.access_token,
-      {
-        method: "POST",
-        body: {
-          content: contentText,
-          encoding: "utf-8",
-        },
-      },
-    );
+    const { blob, sizeBytes } = await createGitHubBlobFromDraft({
+      repositoryName,
+      accessToken: connection.access_token,
+      contentText,
+    });
 
     tree.push({
       path: filePath,
@@ -554,7 +606,7 @@ export async function commitGitHubDrafts(userId, { filePaths, message }) {
       sha: blob.sha,
       contentHash: hashContent(contentText),
       contentFormat: draft.content_format || "xml",
-      sizeBytes: Buffer.byteLength(contentText, "utf8"),
+      sizeBytes,
     });
   }
 
@@ -1021,17 +1073,11 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
     }
     assertPublishableContent(filePath, file.content_format, contentText);
 
-    const blob = await fetchGitHubJson(
-      `/repos/${repositoryName}/git/blobs`,
-      connection.access_token,
-      {
-        method: "POST",
-        body: {
-          content: contentText,
-          encoding: "utf-8",
-        },
-      },
-    );
+    const { blob, sizeBytes } = await createGitHubBlobFromDraft({
+      repositoryName,
+      accessToken: connection.access_token,
+      contentText,
+    });
 
     tree.push({
       path: filePath,
@@ -1040,7 +1086,7 @@ async function publishGitHubSnapshots({ userId, connection, repository, branch, 
       sha: blob.sha,
       contentHash: hashContent(contentText),
       contentFormat: file.content_format || "xml",
-      sizeBytes: Number(file.size_bytes || Buffer.byteLength(contentText, "utf8")),
+      sizeBytes: Number(file.size_bytes || sizeBytes),
       changeType,
     });
   }
@@ -1284,11 +1330,12 @@ async function syncGitHubTreeMetadata(userId, repository, entries) {
         delete from project_files
         where project_id = $1
           and path <> all($2::text[])
+          and github_sha is not null
       `,
       [project.id, syncedPaths],
     );
   } else {
-    await query("delete from project_files where project_id = $1", [project.id]);
+    await query("delete from project_files where project_id = $1 and github_sha is not null", [project.id]);
   }
 
   return {
@@ -1560,7 +1607,7 @@ async function fetchGitHubJson(path, accessToken, options = {}) {
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-  const body = await response.json();
+  const body = await readResponseJson(response);
 
   if (!response.ok) {
     throw Object.assign(new Error(body.message || "GitHub API request failed."), {
@@ -1569,4 +1616,19 @@ async function fetchGitHubJson(path, accessToken, options = {}) {
   }
 
   return body;
+}
+
+async function readResponseJson(response) {
+  const text = await response.text();
+  if (!text.trim()) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      message: response.ok
+        ? "GitHub returned an invalid JSON response."
+        : text || response.statusText || "GitHub API request failed.",
+    };
+  }
 }

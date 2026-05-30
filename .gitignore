@@ -1,6 +1,9 @@
 .env
 node_modules/
 dist/
+playwright-report/
+test-results/
+playwright/.auth/
 
 # Local DITA-OT install. Use DITA_OT_HOME or install under tools/dita-ot-4.4 locally.
 tools/dita-ot-4.4/

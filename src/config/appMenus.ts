@@ -30,6 +30,7 @@ export const appMenus: AppMenuDefinition[] = [
     items: [
       { id: "preferences", label: "Preferences", command: "preferences", icon: "preferences" },
       { id: "specializations", label: "Specializations...", command: "specializations", icon: "schema" },
+      { id: "design-system", label: "Design System...", command: "designSystem", icon: "schema" },
       {
         id: "visual-templates",
         label: "Visual Templates",
@@ -39,6 +40,14 @@ export const appMenus: AppMenuDefinition[] = [
           { id: "open-visual-template", label: "Open...", command: "openVisualTemplate", icon: "schema" },
           { id: "upload-visual-template", label: "Upload...", command: "uploadVisualTemplate", icon: "import" },
           { id: "import-visual-template", label: "Import...", command: "importVisualTemplate", icon: "import" },
+        ],
+      },
+      {
+        id: "node-bindings",
+        label: "Node Bindings",
+        icon: "schema",
+        children: [
+          { id: "create-node-binding-template", label: "New Node-Binding Template...", command: "createNodeBindingTemplate", icon: "schema" },
         ],
       },
     ],
